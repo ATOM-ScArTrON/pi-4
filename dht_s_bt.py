@@ -14,15 +14,15 @@ from RPLCD.i2c import CharLCD
 # SETTINGS
 # =========================================================
 
-MODEL_PATH = "/home/pi/vosk-model-small-en-us-0.15"
-PHOTO_FOLDER = "/home/pi/captured_photos"
+USER_HOME = os.path.expanduser("~")
+MODEL_PATH = os.environ.get("VOSK_MODEL_PATH", os.path.join(USER_HOME, "vosk-model-small-en-us-0.15"))
+PHOTO_FOLDER = os.environ.get("PHOTO_DIR", os.path.join(USER_HOME, "captured_photos"))
 SAMPLE_RATE = 16000
-MIC = "default"
 LCD_ADDRESS = 0x27
 
 # Sensor Pins
-DHT_PIN = board.D4       # GPIO4 (Physical Pin 7)
-SOUND_PIN = 17           # GPIO17 (Physical Pin 11)
+DHT_PIN = board.D17      # GPIO17 (Physical Pin 11) - Verified
+SOUND_PIN = 26           # GPIO26 (Physical Pin 37)
 DHT_INTERVAL = 3.0       # Read DHT11 every 3 seconds
 
 # =========================================================
@@ -66,10 +66,12 @@ except Exception as e:
 latest_temp = None
 latest_humidity = None
 last_dht_read = 0
+dht_connected = None
+consecutive_dht_errors = 0
 
 def update_dht11():
-    """Non-blocking DHT11 polling"""
-    global latest_temp, latest_humidity, last_dht_read
+    """Non-blocking DHT11 polling with wiring diagnostics and terminal output"""
+    global latest_temp, latest_humidity, last_dht_read, dht_connected, consecutive_dht_errors
     
     current_time = time.time()
     if current_time - last_dht_read < DHT_INTERVAL or dht_device is None:
@@ -82,10 +84,26 @@ def update_dht11():
         if temp is not None and hum is not None:
             latest_temp = temp
             latest_humidity = hum
-    except RuntimeError:
-        pass
+            consecutive_dht_errors = 0
+            if dht_connected is not True:
+                dht_connected = True
+                print("\n[DHT11 STATUS] Wiring is CORRECT! Sensor detected on GPIO17.")
+            print(f"[DHT11 READING] Temperature: {latest_temp:.1f}°C | Humidity: {latest_humidity:.1f}%")
+    except RuntimeError as e:
+        err_msg = str(e)
+        consecutive_dht_errors += 1
+        if "not found" in err_msg.lower() or "wiring" in err_msg.lower():
+            if dht_connected is not False:
+                dht_connected = False
+                print(f"\n[DHT11 WIRING ERROR] Sensor NOT detected on GPIO17! Wiring is INCORRECT or disconnected ({e}).")
+        elif consecutive_dht_errors >= 3:
+            if dht_connected is not False:
+                dht_connected = False
+                print(f"\n[DHT11 WIRING WARNING] Wiring issue: Multiple failed read attempts ({e}). Check 3.3V, GND, and Data pins.")
+        else:
+            print(f"[DHT11 Jitter] Transient read retry ({e})")
     except Exception as e:
-        print(f"DHT Read Error: {e}")
+        print(f"\n[DHT11 Read Error]: {e}")
 
 def get_sound_status():
     """Returns 'S:L' for Loud or 'S:Q' for Quiet"""
@@ -97,6 +115,8 @@ def get_dht_string():
     """Format DHT11 readout for Row 2"""
     if latest_temp is not None and latest_humidity is not None:
         return f"T:{latest_temp:.0f}C H:{latest_humidity:.0f}%"
+    if dht_connected is False:
+        return "CHECK WIRING!"
     return "T:--C H:--%"
 
 def show_idle_status():
@@ -197,26 +217,25 @@ def capture_photo():
 # START MICROPHONE STREAM
 # =========================================================
 
-print("\nStarting Bluetooth microphone...")
+print("\nStarting PipeWire audio capture stream...")
 audio_command = [
-    "arecord",
-    "-D", MIC,
-    "-f", "S16_LE",
-    "-r", "16000",
-    "-c", "1",
-    "-t", "raw",
-    "-q"
+    "pw-record",
+    "--target", "@DEFAULT_SOURCE@",
+    "--rate", str(SAMPLE_RATE),
+    "--channels", "1",
+    "--format", "s16",
+    "-"
 ]
 
 try:
     audio = subprocess.Popen(
         audio_command,
         stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
         bufsize=0
     )
 except Exception as e:
-    print("ERROR: Cannot start microphone:", e)
+    print("ERROR: Cannot start PipeWire stream:", e)
     lcd_display("MIC ERROR", "CHECK MIC")
     picam2.stop()
     exit(1)
@@ -246,8 +265,8 @@ try:
             prev_sound_state = current_sound_state
             last_screen_refresh = time.time()
 
-        # Read ~0.5s audio chunk
-        data = audio.stdout.read(16000)
+        # Read audio chunk (low latency matching earbuds.py)
+        data = audio.stdout.read(4000)
         if not data:
             print("\nMicrophone stopped")
             break
