@@ -37,10 +37,9 @@ from vosk import KaldiRecognizer, Model
 # =========================================================
 # 1. SETTINGS & HARDWARE CONFIGURATION
 # =========================================================
-# Filepath to the unpacked offline Vosk small English language model
-MODEL_PATH = "/home/pi/vosk-model-small-en-us-0.15"
-# Directory path on the Pi filesystem where captured photos will be saved
-PHOTO_FOLDER = "/home/pi/captured_photos"
+USER_HOME = os.path.expanduser("~")
+MODEL_PATH = os.environ.get("VOSK_MODEL_PATH", os.path.join(USER_HOME, "vosk-model-small-en-us-0.15"))
+PHOTO_FOLDER = os.environ.get("PHOTO_DIR", os.path.join(USER_HOME, "captured_photos"))
 # Audio sampling rate in Hertz required by the Vosk speech model
 SAMPLE_RATE = 16000
 # ALSA microphone input hardware device profile identifier
@@ -522,13 +521,12 @@ def audio_listener():
     recognizer = KaldiRecognizer(model, SAMPLE_RATE, ALLOWED_COMMANDS)
     # Construct arecord shell arguments to capture raw 16-bit mono PCM audio from the mic
     audio_cmd = [
-        "arecord",
-        "-D", MIC,
-        "-f", "S16_LE",
-        "-r", str(SAMPLE_RATE),
-        "-c", "1",
-        "-t", "raw",
-        "-q"
+    "pw-record",
+    "--target", "@DEFAULT_SOURCE@",
+    "--rate", str(SAMPLE_RATE),
+    "--channels", "1",
+    "--format", "s16",
+    "-"
     ]
     # Spawn continuous arecord background process streaming PCM data over stdout pipe
     proc = subprocess.Popen(audio_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0)
