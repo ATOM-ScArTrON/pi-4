@@ -31,7 +31,7 @@ time.sleep(2)
 # ----------------------------------------------------
 # 2. UART Serial Setup for NEO-6M
 # ----------------------------------------------------
-SERIAL_PORT = "/dev/serial0"
+SERIAL_PORT = "/dev/ttyAMA3"
 BAUD_RATE = 9600
 
 try:

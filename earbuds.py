@@ -1,373 +1,189 @@
 import os
+import sys
 import time
 import json
+import re
 import subprocess
 
 from picamera2 import Picamera2
 from vosk import Model, KaldiRecognizer
 
 # =========================================================
-# SETTINGS
+# SYSTEM & ENVIRONMENT CONFIGURATION
 # =========================================================
 
-MODEL_PATH = "/home/pi/vosk-model-small-en-us-0.15"
-
-PHOTO_FOLDER = "/home/pi/captured_photos"
+USER_HOME = os.path.expanduser("~")
+MODEL_PATH = os.environ.get("VOSK_MODEL_PATH", os.path.join(USER_HOME, "vosk-model-small-en-us-0.15"))
+PHOTO_FOLDER = os.environ.get("PHOTO_DIR", os.path.join(USER_HOME, "captured_photos"))
 
 SAMPLE_RATE = 16000
-
-# Bluetooth microphone
-MIC = "default"
-
+CAPTURE_COOLDOWN = 3.0
 
 # =========================================================
-# CREATE PHOTO FOLDER
+# HARDWARE AGNOSTIC HELPERS
+# =========================================================
+
+def detect_audio_device():
+    """Dynamically locates an available ALSA capture device or defaults."""
+    env_mic = os.environ.get("AUDIO_DEVICE")
+    if env_mic:
+        return env_mic
+
+    try:
+        output = subprocess.check_output(["arecord", "-l"], text=True, stderr=subprocess.DEVNULL)
+        cards = re.findall(r"card (\d+):", output)
+        if cards:
+            return f"hw:{cards[0]},0"
+    except Exception:
+        pass
+    
+    return "default"
+
+MIC = detect_audio_device()
+
+# =========================================================
+# INITIALIZATION & VERIFICATION
 # =========================================================
 
 os.makedirs(PHOTO_FOLDER, exist_ok=True)
 
-
-# =========================================================
-# CHECK VOSK MODEL
-# =========================================================
-
 if not os.path.exists(MODEL_PATH):
-    print("ERROR: Vosk model not found:")
-    print(MODEL_PATH)
-    exit(1)
-
-
-# =========================================================
-# LOAD VOSK
-# =========================================================
+    sys.exit(f"ERROR: Vosk model directory not found at: {MODEL_PATH}")
 
 print("Loading Vosk model...")
-
 model = Model(MODEL_PATH)
+recognizer = KaldiRecognizer(model, SAMPLE_RATE)
 
-recognizer = KaldiRecognizer(
-    model,
-    SAMPLE_RATE
-)
-
-print("Vosk model loaded successfully")
-
-
-# =========================================================
-# OPEN RASPBERRY PI CAMERA
-# =========================================================
-
-print("Opening Raspberry Pi Camera...")
-
+print("Opening camera interface...")
 picam2 = Picamera2()
-
-camera_config = picam2.create_still_configuration(
-    main={
-        "size": (640, 480)
-    }
-)
-
+camera_config = picam2.create_still_configuration(main={"size": (640, 480)})
 picam2.configure(camera_config)
-
 picam2.start()
 
-# Allow camera to stabilize
-time.sleep(2)
-
-print("Raspberry Pi Camera opened successfully")
-
+time.sleep(2)  # Sensor stabilization phase
 
 # =========================================================
-# CAPTURE CONTROL
+# CAPTURE ROUTINE
 # =========================================================
 
-last_capture = 0
-
+last_capture = 0.0
 
 def capture_photo():
-
     global last_capture
-
     current_time = time.time()
 
-    # Prevent duplicate captures
-    if current_time - last_capture < 3:
-        print("Capture ignored - waiting...")
+    if current_time - last_capture < CAPTURE_COOLDOWN:
+        print("Capture ignored - cooldown active...")
         return
 
     last_capture = current_time
 
-    print()
-    print("================================")
-    print("CAPTURE COMMAND DETECTED")
-    print("================================")
-
-    # Small delay before taking picture
+    print("\n" + "=" * 32 + "\nCAPTURE COMMAND DETECTED\n" + "=" * 32)
     time.sleep(0.5)
 
-    # =====================================================
-    # CREATE FILE NAME
-    # =====================================================
-
-    timestamp = time.strftime(
-        "%Y%m%d_%H%M%S"
-    )
-
-    filename = (
-        "capture_" +
-        timestamp +
-        ".jpg"
-    )
-
-    filepath = os.path.join(
-        PHOTO_FOLDER,
-        filename
-    )
-
-    # =====================================================
-    # TAKE PHOTO
-    # =====================================================
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    filepath = os.path.join(PHOTO_FOLDER, f"capture_{timestamp}.jpg")
 
     print("Taking picture...")
-
     try:
-
         picam2.capture_file(filepath)
-
     except Exception as e:
-
-        print("ERROR: Cannot capture image")
-        print(e)
+        print(f"ERROR: Image capture failed: {e}")
         return
-
-    # =====================================================
-    # CHECK FILE
-    # =====================================================
 
     if os.path.exists(filepath):
-
-        filesize = os.path.getsize(filepath)
-
-        print()
-        print("PHOTO CAPTURED!")
-        print("File:", filename)
-        print("Saved:", filepath)
-        print("Size:", filesize, "bytes")
-
+        print(f"\nPHOTO CAPTURED!\nPath: {filepath}\nSize: {os.path.getsize(filepath)} bytes")
     else:
+        print("ERROR: Photo file was not created.")
 
-        print("ERROR: Photo file was not created")
-        return
-
-    print()
-    print('READY - SAY "CAPTURE" OR "YES"')
-    print()
-
+    print('\nREADY - SAY "CAPTURE" OR "YES"\n')
 
 # =========================================================
-# START BLUETOOTH MICROPHONE
+# MICROPHONE STREAM SETUP
 # =========================================================
 
-print()
-print("Starting Bluetooth microphone...")
+print("Starting PipeWire audio capture stream...")
 
 audio_command = [
-    "arecord",
-    "-D",
-    MIC,
-    "-f",
-    "S16_LE",
-    "-r",
-    "16000",
-    "-c",
-    "1",
-    "-t",
-    "raw",
-    "-q"
+    "pw-record",
+    "--target", "@DEFAULT_SOURCE@",
+    "--rate", str(SAMPLE_RATE),
+    "--channels", "1",
+    "--format", "s16",
+    "-"
 ]
 
 try:
-
     audio = subprocess.Popen(
         audio_command,
         stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
         bufsize=0
     )
-
 except Exception as e:
-
-    print("ERROR: Cannot start microphone")
-    print(e)
-
     picam2.stop()
-    exit(1)
-
+    sys.exit(f"ERROR: Failed to start PipeWire audio stream: {e}")
 
 # =========================================================
-# READY MESSAGE
+# RUNTIME STATUS DISPLAY
 # =========================================================
 
-print()
-print("======================================")
+print("\n" + "=" * 38)
 print("        VOICE CAMERA READY")
-print("======================================")
-print()
-
-print('Say "CAPTURE" to take a picture')
-print('Say "YES" to take a picture')
-
-print()
-
-print("Camera : Raspberry Pi CSI Camera")
-print("Mic    : Noise Buds VS201")
-print("Audio  : 16000 Hz / Mono")
-print("Image  : 640 x 480")
-
-print()
-print("Photos:")
-print(PHOTO_FOLDER)
-
-print()
-print("======================================")
-print()
-
+print("=" * 38 + "\n")
+print('Trigger keywords: "CAPTURE" / "YES"\n')
+print(f"Audio Device : {MIC}")
+print(f"Audio Format : {SAMPLE_RATE} Hz / Mono")
+print(f"Storage Path : {PHOTO_FOLDER}\n")
+print("=" * 38 + "\n")
 
 # =========================================================
-# MAIN VOICE LOOP
+# MAIN RECOGNITION LOOP
 # =========================================================
 
 try:
-
     while True:
-
-        # Read approximately 1 second of audio
-        data = audio.stdout.read(32000)
-
+        data = audio.stdout.read(4000)
         if not data:
-
-            print()
-            print("Microphone stopped")
+            print("\nAudio stream stopped.")
             break
 
-        # =================================================
-        # FINAL VOSK RESULT
-        # =================================================
-
         if recognizer.AcceptWaveform(data):
-
-            result = json.loads(
-                recognizer.Result()
-            )
-
-            text = result.get(
-                "text",
-                ""
-            ).lower().strip()
+            result = json.loads(recognizer.Result())
+            text = result.get("text", "").lower().strip()
 
             if text:
+                print(f"\nHEARD: {text}")
 
-                print()
-                print("HEARD:", text)
-
-            # =================================================
-            # CAPTURE COMMAND
-            # =================================================
-
-            if (
-                "capture" in text
-                or "yes" in text
-            ):
-
+            if "capture" in text or "yes" in text:
                 capture_photo()
-
-                # Reset recognizer after capture
-                recognizer = KaldiRecognizer(
-                    model,
-                    SAMPLE_RATE
-                )
-
+                recognizer.Reset()
         else:
-
-            # =================================================
-            # PARTIAL RESULT
-            # =================================================
-
-            partial_result = json.loads(
-                recognizer.PartialResult()
-            )
-
-            partial_text = partial_result.get(
-                "partial",
-                ""
-            ).lower().strip()
+            partial_result = json.loads(recognizer.PartialResult())
+            partial_text = partial_result.get("partial", "").lower().strip()
 
             if partial_text:
+                print(f"Listening: {partial_text}", end="\r")
 
-                print(
-                    "Listening:",
-                    partial_text,
-                    end="\r"
-                )
-
-            # =================================================
-            # CAPTURE COMMAND IN PARTIAL RESULT
-            # =================================================
-
-            if (
-                "capture" in partial_text
-                or "yes" in partial_text
-            ):
-
+            if "capture" in partial_text or "yes" in partial_text:
                 capture_photo()
-
-                # Reset recognizer
-                recognizer = KaldiRecognizer(
-                    model,
-                    SAMPLE_RATE
-                )
-
-
-# =========================================================
-# STOP WITH CTRL+C
-# =========================================================
+                recognizer.Reset()
 
 except KeyboardInterrupt:
-
-    print()
-    print()
-    print("Stopping...")
-
-
-# =========================================================
-# CLEANUP
-# =========================================================
+    print("\n\nStopping application...")
 
 finally:
-
-    print("Cleaning up...")
-
-    # Stop microphone
-    try:
-
+    print("Cleaning up resources...")
+    if 'audio' in locals():
         audio.terminate()
-        audio.wait(timeout=2)
-
-    except Exception:
-
         try:
+            audio.wait(timeout=1)
+        except subprocess.TimeoutExpired:
             audio.kill()
-        except Exception:
-            pass
 
-    # Stop camera
     try:
-
         picam2.stop()
-
     except Exception:
         pass
 
-    print("Camera stopped.")
-    print("Microphone stopped.")
-    print("Program stopped.")
+    print("Hardware shutdown complete.")
