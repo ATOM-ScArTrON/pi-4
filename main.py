@@ -16,6 +16,7 @@ import threading
 import importlib
 from gpiozero import Button
 from modules.bluetooth_manager import BluetoothManager
+from modules.status_utils import print_audio_status
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -64,7 +65,12 @@ def run_module(module_path):
 
 def parse_action(text):
     """Standardize keyword matching for both voice and typed inputs."""
-    tokens = set(text.lower().split())
+    body = text.strip().lower()
+    tokens = set(body.split())
+    if body == "status":
+        return "STATUS"
+    if body in ("mute tts", "tts off", "voice off"):
+        return "MUTE_TTS"
     if {"click", "capture", "photo", "picture", "snap"}.intersection(tokens):
         return "CAPTURE"
     if {"send", "transmit"}.intersection(tokens):
@@ -261,13 +267,40 @@ def run_full_system():
                 action = parse_action(raw_voice_cmd)
                 print(f"\n[VOICE TRIGGER]: '{raw_voice_cmd}' -> Action: {action}")
 
-                if action == "CAPTURE":
+                if action == "MUTE_TTS":
+                    tts.mute()
+                    lcd.show_banner("TTS", "MUTED", duration = 1.5)
+                elif action == "UNMUTE TTS":
+                    tts.unmute()
+                    lcd.show_banner("TTS", "UNMUTED", duration = 1.5)
+                elif action == "MUTE STT":
+                        stt.mute()
+                        lcd.show_banner("STT", "MUTED", duration = 1.5)
+                elif action == "UNMUTE STT":
+                        stt.unmute()
+                        lcd.show_banner("STT", "UNMUTED", duration = 1.5)
+                elif action == "CAPTURE":
                     trigger_photo(source=f"VOICE '{raw_voice_cmd}'")
                 elif action == "SEND":
                     trigger_lora_tx(source=f"VOICE '{raw_voice_cmd}'")
                 elif action == "RECEIVE":
                     lcd.show_banner("LORA RX", "LISTENING...", duration=3.0)
                     tts.speak("Listening for incoming transmissions.")
+                elif action == "STATUS":
+                    print_audio_status(tts, stt, lcd)
+                    bt_state = bt.name if bt.is_connected() else "none"
+
+                    sensor_states = {
+                        "DHT11":    dht.dht_device is not None,
+                        "MPU6050":  motion.is_connected,
+                        "MAX30102": vitals.is_connected,
+                        "GPS":      gps.ser is not None,
+                        "Camera":   camera.picam2 is not None,
+                        "LoRa":     lora.ser is not None,
+                    }
+                    failed = [name for name, ok in sensor_states.items() if not ok]                    
+                    print(f"[Status] BT = {bt_state} | [Status] Sensors down: {', '.join(failed) if failed else 'none'}")
+                    lcd.log("BT:" + bt_state[:12].upper(), "DOWN:" + (",".join(failed)[:11] if failed else "NONE"), duration=2.0)
                 else:
                     lcd.show_banner("VOICE TXT", raw_voice_cmd[:16], duration=3.0)
                     lora.send_text(raw_voice_cmd)
@@ -277,7 +310,19 @@ def run_full_system():
                 action = parse_action(raw_typed_cmd)
                 print(f"\n[TYPED TRIGGER]: '{raw_typed_cmd}' -> Action: {action}")
 
-                if action == "CAPTURE":
+                if action == "MUTE_TTS":
+                    tts.mute()
+                    lcd.show_banner("TTS", "MUTED", duration = 1.5)
+                elif action == "UNMUTE TTS":
+                    tts.unmute()
+                    lcd.show_banner("TTS", "UNMUTED", duration = 1.5)
+                elif action == "MUTE STT":
+                        stt.mute()
+                        lcd.show_banner("STT", "MUTED", duration = 1.5)
+                elif action == "UNMUTE STT":
+                        stt.unmute()
+                        lcd.show_banner("STT", "UNMUTED", duration = 1.5)
+                elif action == "CAPTURE":
                     trigger_photo(source=f"TYPED '{raw_typed_cmd}'")
                 elif action == "SEND":
                     trigger_lora_tx(source=f"TYPED '{raw_typed_cmd}'")

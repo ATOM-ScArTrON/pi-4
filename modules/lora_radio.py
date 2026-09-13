@@ -9,6 +9,7 @@ import serial
 from gpiozero import OutputDevice
 from config import LORA_PORT, LORA_BAUD, LORA_M0_PIN, LORA_M1_PIN
 from modules.lora_protocol import LoRaProtocol, LoRaAssembler
+from modules.status_utils import print_audio_status
 
 class LoRaRadio:
     def __init__(self, port=LORA_PORT, baudrate=LORA_BAUD):
@@ -262,6 +263,14 @@ def run_standalone(lcd=None):
             body = body.lower()
             if body.startswith("message "):
                 return None
+        if body in ("mute tts", "tts off"):
+            return "MUTE_TTS"
+        if body in ("unmute tts", "tts on"):
+            return "UNMUTE_TTS"
+        if body in ("mute stt", "stt off"):
+            return "MUTE_STT"
+        if body in ("unmute stt", "stt on"):
+            return "UNMUTE_STT"
         if body in ("send", "transmit"):
             return "send"
         if body in ("receive", "listen"):
@@ -320,9 +329,11 @@ def run_standalone(lcd=None):
                 if escaped is not None:
                     _send_text_message(escaped, source)
                 else:
-                    result = sm.route_command(text, source=source, confirm_fn=confirm_switch)
+                    result = sm.route_command(text, source=source, confirm_fn=confirm_switch)   
                     if result == "EXIT":
                         break
+                    elif result == "STATUS":
+                        print_audio_status(tts, stt, lcd)
                     elif result is not None:
                         pass  # session command handled (activate/switch/status/menu)
                     else:

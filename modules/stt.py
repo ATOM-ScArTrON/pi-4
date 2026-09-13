@@ -23,6 +23,8 @@ class SpeechToText:
         self.latest_partial = ""
         self.last_command_time = 0
 
+        self.enabled = True
+
         self._init_model()
 
     def _init_model(self):
@@ -77,7 +79,7 @@ class SpeechToText:
             if self.recognizer.AcceptWaveform(data):
                 res = json.loads(self.recognizer.Result())
                 text = res.get("text", "").strip()
-                if text and text != "[unk]":
+                if text and text != "[unk]" and self.enabled:
                     print(f"\n[STT HEARD]: {text}")
                     self.transcript_queue.put(text)
             else:
@@ -91,6 +93,14 @@ class SpeechToText:
             self.proc.wait(timeout=1)
         except Exception:
             pass
+
+    def mute(self):
+        self.enabled = False
+        print("[STT] Muted.")
+
+    def unmute(self):
+        self.enabled = True
+        print("[STT] Unmuted.")
 
     def get_transcript(self, block=False):
         try:
