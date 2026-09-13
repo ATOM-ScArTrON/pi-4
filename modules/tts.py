@@ -11,6 +11,7 @@ import subprocess
 class TextToSpeech:
     def __init__(self):
         self.engine = self._detect_engine()
+        self.enabled = True
         print(f"[TTS] Engine active: {self.engine}")
 
     def _detect_engine(self):
@@ -25,13 +26,21 @@ class TextToSpeech:
         return "dummy"
 
     def speak(self, text, block=False):
-        if not text:
+        if not text or not self.enabled:
             return
 
         if block:
             self._do_speak(text)
         else:
             threading.Thread(target=self._do_speak, args=(text,), daemon=True).start()
+
+    def mute(self):
+        self.enabled = False
+        print("[TTS] Muted.")
+
+    def unmute(self):
+        self.enabled = True
+        print("[TTS] Unmuted.")
 
     def _do_speak(self, text):
         clean_text = text.replace('"', '').replace("'", "")

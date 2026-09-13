@@ -99,6 +99,14 @@ def run_standalone(lcd=None):
             body = body.lower()
             if body.startswith("message "):
                 return None  # spoken escape, handled by the caller first
+        if body in ("mute tts", "tts off"):
+            return "MUTE_TTS"
+        if body in ("unmute tts", "tts on"):
+            return "UNMUTE_TTS"
+        if body in ("mute stt", "stt off"):
+            return "MUTE_STT"
+        if body in ("unmute stt", "stt on"):
+            return "UNMUTE_STT"
         if body in ("exit", "quit"):
             return "EXIT"
         return None
