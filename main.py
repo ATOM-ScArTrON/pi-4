@@ -192,10 +192,17 @@ def run_full_system():
             "LON": gps.lon,
             "SATS": gps.sats
         }
+        print(f"\n[LoRa TX Packet Attempt]: Type=VITALS | Source={source} | Data={payload}")
         lcd.show_banner("LORA TX", f"B:{int(payload['BPM'])} S:{int(payload['SPO2'])}%", duration=2.5)
         success = lora.send_vitals(payload)
+
         if success:
+            print("[LoRa TX Packet Sent]: Type=VITALS")
             tts.speak("Telemetry transmitted.")
+        else:
+            print("[LoRa TX Failed]: Transmission error.")
+            lcd.show_banner("LORA TX", "FAILED", duration=2.5)
+            tts.speak("Telemetry transmission failed.")
 
     # --- Startup Health Check: surface hardware/init failures on LCD ---
     def check_startup_health():

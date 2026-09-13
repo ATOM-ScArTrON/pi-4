@@ -124,6 +124,23 @@ def run_standalone(lcd=None):
             lcd.log("LORA RX", str(p_type), duration=2.0)
             tts.speak(f"Received transmission of type {p_type}")
 
+    def _send_text_message(text, source):
+        """Transmit a text message and mirror the outcome to terminal/LCD/TTS,
+        using the same three-channel structure _on_packet() uses for RX."""
+        print(f"\n[LoRa TX Attempt]: Source={source} | Text='{text}'")
+        sent = radio.send_text(text)
+
+        if sent:
+            print(f"[LoRa TX Packet Sent]: Type=TEXT | Data={{'text': '{text}'}}")
+            lcd.log("TX MSG", text[:16], duration=2.5)
+            tts.speak(f"Message transmitted: {text}")
+        else:
+            print("[LoRa TX Failed]: Transmission error.")
+            lcd.log("TX FAILED", text[:16], duration=2.5)
+            tts.speak("Transmission failed.")
+
+        return sent
+
     radio.start_listener(on_packet_received=_on_packet)
     if stt.model:
         stt.start()
@@ -163,12 +180,7 @@ def run_standalone(lcd=None):
                 tokens = set(lower_text.split())
 
                 if {"send", "transmit"}.intersection(tokens):
-                    print(f"\n[{source} COMMAND]: 'send' -> Transmitting ping packet")
-                    lcd.log("LORA TX", "SENDING PING...", duration=1.5)
-                    sent = radio.send_text("PING")
-                    print("[LoRa Output]: Broadcast success." if sent else "[LoRa Output]: Transmission failed.")
-                    lcd.log("LORA TX", "SENT" if sent else "FAILED", duration=2.5)
-                    tts.speak("Ping message transmitted." if sent else "Transmission failed.")
+                    _send_text_message("PING", source)
 
                 elif {"receive", "listen"}.intersection(tokens):
                     print(f"\n[{source} COMMAND]: 'receive' -> Checking buffer")
@@ -183,12 +195,7 @@ def run_standalone(lcd=None):
                         tts.speak("No unread packets. Listening for incoming signals.")
 
                 else:
-                    print(f"\n[{source} COMMAND]: Transmitting text -> '{text}'")
-                    lcd.log("LORA TX", text[:16], duration=1.5)
-                    sent = radio.send_text(text)
-                    print("[LoRa Output]: Broadcast success." if sent else "[LoRa Output]: Transmission failed.")
-                    lcd.log("LORA TX STATUS", "SENT" if sent else "FAILED", duration=2.5)
-                    tts.speak(f"Message transmitted: {text}" if sent else "Transmission failed.")
+                    _send_text_message(text, source)
 
             time.sleep(0.05)
 
