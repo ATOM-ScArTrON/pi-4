@@ -1,86 +1,119 @@
 #!/bin/bash
-sudo apt-get update
-sudo apt-get update -y
-sudo apt-get upgrade -y
-sudo apt-get install python3-pip
-sudo pip3 install adafruit-blinka
-sudo pip3 install adafruit-circuitpython-mcp3xxx
-sudo apt-get install build-essential python-dev python3-smbus git
-cd ~
-git clone https://github.com/adafruit/Adafruit_Python_MCP3008.git
-cd Adafruit_Python_MCP3008
-sudo python3 setup.py install
-sudo pip3 install Adafruit_DHT
-sudo pip install Adafruit_DHT
-sudo pip install pad4pi
-sudo apt-get install python3-dev python3-pip
-sudo pip3 install mfrc522
-python3 -m venv ~/mcp3008-demo-venv
-source ~/mcp3008-demo-venv/bin/activate
-pip install adafruit-circuitpython-mcp3xxx
-sudo apt update
-sudo apt install -y python3-smbus i2c-tools
-i2cdetect -y 1
-sudo apt update
-sudo apt install -y python3-smbus i2c-tools
-pip3 install RPLCD
-sudo apt-get install python3-serial python3-rpi.gpio
-pip3 install max30102
-pip3 install git+https://github.com
-wget https://githubusercontent.com
-pip3 install max30100
-pip3 install RPLCD
-sudo apt update
-sudo apt install python3-pip portaudio19-dev libasound2-dev
-pip3 install vosk sounddevice opencv-python
-pip3 install --user vosk sounddevice opencv-python
-sudo apt install v4l-utils
-pip3 uninstall opencv-python numpy -y
-sudo apt update
-python3 -m pip install --user vosk
-sudo apt install python3-opencv python3-pyaudio portaudio19-dev
-wget https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip
-pip3 install vosk
-sudo apt-get install python3-serial python3-rpi.gpio
-python3 -m pip install vosk
-pip3 install vosk sounddevice opencv-python
-sudo apt install python3-pip portaudio19-dev libasound2-dev
-sudo apt install python3-opencv
-python3 -c "import cv2; print(cv2.__version__)"
-python3 -c "import vosk; print('VOSK OK')"
-sudo apt install python3-sounddevice
-pip3 install --user sounddevice
-sudo apt-get update
-sudo apt-get install python3-smbus i2c-tools
-pip install mpu6050-raspberrypi
-sudo apt update
-sudo apt install -y python3-gps gpsd gpsd-clients
+set -e
 
-cd ~
-wget https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip
-unzip vosk-model-small-en-us-0.15.zip
-rm vosk-model-small-en-us-0.15.zip
-pip install --break-system-packages \
+echo "=== 1. Updating System & Installing All OS-Level Dependencies ==="
+sudo apt-get update && sudo apt-get install -y --no-install-recommends \
+    python3-pip \
+    python3-dev \
+    python3-venv \
+    i2c-tools \
+    libgpiod-dev \
+    gpiod \
+    bluez \
+    pipewire \
+    pipewire-bin \
+    espeak-ng \
+    speech-dispatcher \
+    swig \
+    liblgpio-dev \
+    libcap-dev \
+    python3-picamera2 \
+    python3-libcamera \
+    libcamera-apps-lite \
+    direnv
+
+echo "=== 1.5. Enabling Hardware Interfaces (I2C & Serial) ==="
+# Programmatically enable I2C, Serial hardware and UART interfaces
+sudo raspi-config nonint do_i2c 0
+sudo raspi-config nonint do_serial_hw 0
+
+CONFIG_FILE="/boot/firmware/config.txt"
+if [ ! -f "$CONFIG_FILE" ]; then
+    CONFIG_FILE="/boot/config.txt"
+fi
+
+if ! grep -q "dtoverlay=uart3" "$CONFIG_FILE"; then
+    echo "Enabling UART3 hardware overlay..."
+    echo "dtoverlay=uart3" | sudo tee -a "$CONFIG_FILE" > /dev/null
+fi
+
+echo "=== 2. Creating Virtual Environment (with System Site Packages) ==="
+if [ ! -d "venv" ]; then
+    python3 -m venv --system-site-packages venv
+fi
+
+# Explicitly force the system package flag to true to guarantee portability
+if [ -f "venv/pyvenv.cfg" ]; then
+    sed -i 's/include-system-site-packages = false/include-system-site-packages = true/' venv/pyvenv.cfg
+fi
+
+source venv/bin/activate
+
+echo "=== 3. Upgrading Python Packaging Tools ==="
+pip install --upgrade pip setuptools wheel
+
+echo "=== 4. Installing Python Dependencies ==="
+pip install --no-cache-dir \
+    gpiozero \
+    smbus2 \
     pyserial \
     pynmea2 \
-    RPLCD \
-    smbus2 \
+    adafruit-blinka \
     adafruit-circuitpython-dht \
-    gpiozero \
-    mpu6050-raspberrypi \
-    vosk
-sudo apt update && sudo apt install -y \
-    python3-pip \
-    python3-smbus \
-    i2c-tools \
-    alsa-utils \
-    libgpiod2 \
-    libcap-dev \
-    libcamera-dev \
-    python3-libcamera \
-    python3-picamera2 \
-    wget \
-    unzip
+    RPLCD \
+    vosk 
 
+echo "=== 5. Configuring Direnv Automation ==="
+cat << 'EOF' > .envrc
+# Explicitly activate the venv path without calling python macros
+if [ -d "venv" ]; then
+    export VIRTUAL_ENV="$PWD/venv"
+    PATH_add "$VIRTUAL_ENV/bin"
+fi
+EOF
 
+# Inject hook into bashrc if missing
+if ! grep -q "direnv hook bash" ~/.bashrc 2>/dev/null; then
+    echo 'eval "$(direnv hook bash)"' >> ~/.bashrc
+fi
 
+# Force allow for both the current user running the script and root
+direnv allow . 2>/dev/null || true
+if [ -n "$SUDO_USER" ]; then
+    sudo -u "$SUDO_USER" direnv allow . 2>/dev/null || true
+fi
+
+echo "=== 6. Generating .gitignore ==="
+cat << 'EOF' > .gitignore
+# Python Virtual Environment and Cache
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Direnv local security state
+.direnv/
+.envrc
+
+# Vosk Speech Models
+vosk-model-*/
+
+# Media and Test Artifacts
+*.wav
+*.jpg
+*.png
+*.jpeg
+
+# OS Generated Files
+.DS_Store
+Thumbs.db
+EOF
+
+echo "=== 7. Cleaning Up Redundant Artifacts ==="
+rm -f dht_s_bt.py earbuds.py gps.py loratxrx.py nbm.py test.wav
+find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+
+echo "--------------------------------------------------"
+echo "Setup Complete! To apply hardware interface changes,"
+echo "please reboot your Pi using: sudo reboot"
+echo "--------------------------------------------------"

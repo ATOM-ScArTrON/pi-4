@@ -1,0 +1,22 @@
+# Python Virtual Environment and Cache
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Direnv local security state
+.direnv/
+.envrc
+
+# Vosk Speech Models
+vosk-model-*/
+
+# Media and Test Artifacts
+*.wav
+*.jpg
+*.png
+*.jpeg
+
+# OS Generated Files
+.DS_Store
+Thumbs.db
