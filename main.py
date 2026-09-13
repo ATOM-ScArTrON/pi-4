@@ -37,7 +37,8 @@ MENU = {
     "9":  ("Text-to-Speech",             "modules.tts"),
     "10": ("Speech-to-Text",             "modules.stt"),
     "11": ("Bluetooth Manager",          "modules.bluetooth_manager"),
-    "12": ("Full Integrated System",     None),
+    "12": ("LoRa Chat Mode",             "modules.chat_mode"),
+    "13": ("Full Integrated System",     None),
     "0":  ("Exit",                       None),
 }
 
@@ -333,7 +334,7 @@ def main():
             print("Goodbye!")
             break
 
-        elif choice == "12":
+        elif choice == "13":
             run_full_system()
 
         else:

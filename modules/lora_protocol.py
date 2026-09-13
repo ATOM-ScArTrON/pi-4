@@ -13,14 +13,33 @@ MAX_CHUNK_BYTES = 120
 class LoRaProtocol:
     @staticmethod
     def encode_vitals(vitals_data):
+        """Bundled telemetry packet used by the full-system loop (main.py) --
+        carries every sensor's latest value in one packet. Tagged 'TEL'
+        (not 'VIT') so it doesn't collide with the per-sensor VIT reading
+        type below, which has a different, smaller schema."""
         return [json.dumps({
-            "T": "VIT", "TS": time.strftime("%H:%M:%S"),
+            "T": "TEL", "TS": time.strftime("%H:%M:%S"),
             "BPM": int(vitals_data.get("BPM", 0)), "SPO2": int(vitals_data.get("SPO2", 0)),
             "TMP": int(vitals_data.get("TEMP", 0)), "HUM": int(vitals_data.get("HUM", 0)),
             "SND": vitals_data.get("SOUND", "Q"), "FB": vitals_data.get("FB", "Level"),
             "LR": vitals_data.get("LR", "Level"), "LAT": vitals_data.get("LAT", "0.0000"),
             "LON": vitals_data.get("LON", "0.0000"), "SAT": str(vitals_data.get("SATS", "0"))
         }) + "\n"]
+
+    # Per-sensor reading types -- one sensor's fields per packet, so a
+    # receiver never has to guess whether an absent/zeroed field means
+    # "not sent" vs "read as zero". Used by the LoRa send-selector menu.
+    READING_TYPES = {"DHT", "SND", "MOT", "VIT", "GPS"}
+
+    @staticmethod
+    def encode_reading(packet_type, data_dict):
+        """Generic single-packet encoder for one sensor's reading. Unlike
+        encode_vitals() above (a fixed bundle for the full-system loop),
+        this sends exactly the fields for one sensor, tagged with its own
+        type code."""
+        payload = {"T": packet_type, "TS": time.strftime("%H:%M:%S")}
+        payload.update(data_dict)
+        return [json.dumps(payload) + "\n"]
 
     @staticmethod
     def _encode_chunked(data_bytes, data_type):
@@ -61,7 +80,9 @@ class LoRaAssembler:
         except json.JSONDecodeError: return None
 
         pkt_type = pkt.get("T")
-        if pkt_type == "VIT": return {"type": "VITALS", "data": pkt}
+        if pkt_type == "TEL": return {"type": "VITALS", "data": pkt}
+        if pkt_type in LoRaProtocol.READING_TYPES:
+            return {"type": "READING", "sensor": pkt_type, "data": pkt}
 
         session_id, idx, tot = pkt.get("ID"), pkt.get("IDX", 1), pkt.get("TOT", 1)
         if tot == 1 and pkt_type == "TXT":
