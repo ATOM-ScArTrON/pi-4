@@ -1,11 +1,11 @@
 """
-MAX30102 Pulse Oximeter & Heart Rate sensor driver using direct I2C smbus.
+MAX30102 Pulse Oximeter & Heart Rate sensor driver using direct I2C smbus2.
 Computes live Heart Rate (BPM) and Blood Oxygen Saturation (SpO2%) with finger detection.
 """
 
 import time
 import collections
-import smbus
+from smbus2 import SMBus
 from config import I2C_BUS, MAX30102_ADDR, FINGER_THRESHOLD
 
 # MAX30102 Registers
@@ -21,8 +21,10 @@ REG_LED2_PULSE_AMP = 0x0D
 
 MODE_HR_SPO2       = 0x03
 RESET_MAX          = 0x40
-LED_CURR_RED       = 0x24  # ~7.2mA drive current
-LED_CURR_IR        = 0x24  # ~7.2mA drive current
+LED_CURR_RED       = 0x24  
+LED_CURR_IR        = 0x24  
+
+LCD_REFRESH_INTERVAL = 0.5  # throttle LCD writes independent of terminal print rate
 
 class VitalsSensor:
     def __init__(self, bus_num=I2C_BUS, addr=MAX30102_ADDR, finger_thresh=FINGER_THRESHOLD):
@@ -48,20 +50,14 @@ class VitalsSensor:
 
     def _init_sensor(self):
         try:
-            self.bus = smbus.SMBus(self.bus_num)
-            # Soft reset
+            self.bus = SMBus(self.bus_num)
             self.bus.write_byte_data(self.addr, REG_MODE_CONFIG, RESET_MAX)
             time.sleep(0.05)
-            # FIFO configuration (sample averaging=4, rollover enabled)
             self.bus.write_byte_data(self.addr, REG_FIFO_CONFIG, 0x50)
-            # HR + SpO2 mode
             self.bus.write_byte_data(self.addr, REG_MODE_CONFIG, MODE_HR_SPO2)
-            # SpO2 ADC range & sample rate (100 samples/sec, 18-bit)
             self.bus.write_byte_data(self.addr, REG_SPO2_CONFIG, 0x27)
-            # LED currents
             self.bus.write_byte_data(self.addr, REG_LED1_PULSE_AMP, LED_CURR_RED)
             self.bus.write_byte_data(self.addr, REG_LED2_PULSE_AMP, LED_CURR_IR)
-            # Clear FIFO pointers
             self.bus.write_byte_data(self.addr, REG_FIFO_WR_PTR, 0x00)
             self.bus.write_byte_data(self.addr, REG_OVF_COUNTER, 0x00)
             self.bus.write_byte_data(self.addr, REG_FIFO_RD_PTR, 0x00)
@@ -80,7 +76,6 @@ class VitalsSensor:
             return 0, 0
 
     def update(self):
-        """Processes FIFO samples and updates BPM and SpO2 metrics."""
         if not self.bus or not self.is_connected:
             return
 
@@ -106,14 +101,12 @@ class VitalsSensor:
             ac_ir = ir - dc_ir
             ac_red = red - dc_red
 
-            # Peak detection for cardiac cycle
             if ac_ir > 100 and not self.is_peak:
                 self.is_peak = True
                 now = time.time()
                 time_delta = now - self.last_peak_time
                 self.last_peak_time = now
 
-                # Valid interval between 0.60s and 1.15s (~52 to ~100 BPM)
                 if 0.60 <= time_delta <= 1.15:
                     raw_bpm = 60.0 / time_delta
                     clamped_bpm = max(60.0, min(90.0, round(raw_bpm, 1)))
@@ -123,7 +116,6 @@ class VitalsSensor:
             elif ac_ir < -50:
                 self.is_peak = False
 
-            # Blood oxygen SpO2 calculation
             if dc_ir > 0 and dc_red > 0 and abs(ac_ir) > 10:
                 r_ratio = (abs(ac_red) / dc_red) / (abs(ac_ir) / dc_ir)
                 calc_spo2 = 104.0 - (17.0 * r_ratio)
@@ -133,18 +125,49 @@ class VitalsSensor:
                 elif self.spo2 is None:
                     self.spo2 = 98.0
 
-if __name__ == "__main__":
-    print("Testing VitalsSensor module...")
-    vitals = VitalsSensor()
-    print("Place finger on sensor:")
-    for _ in range(30):
-        vitals.update()
-        if vitals.finger_detected:
-            bpm_s = f"{int(vitals.bpm)}" if vitals.bpm else "--"
-            spo2_s = f"{int(vitals.spo2)}%" if vitals.spo2 else "--"
-            print(f"Finger: TOUCH | BPM: {bpm_s} | SpO2: {spo2_s}", end="\r")
-        else:
-            print("Finger: NONE                        ", end="\r")
-        time.sleep(0.05)
-    print("\nVitalsSensor test complete.")
+    def close(self):
+        if self.bus:
+            try: self.bus.close()
+            except Exception: pass
 
+
+def run_standalone(lcd=None):
+    """Continuously print live BPM/SpO2 until Ctrl+C. Mirrors readings to LCD (throttled)."""
+    sensor = VitalsSensor()
+
+    own_lcd = lcd is None
+    if own_lcd:
+        from modules.display import Display
+        lcd = Display()
+
+    print(f"[MAX30102] Connected: {sensor.is_connected}. Place finger on sensor. Press Ctrl+C to stop.\n")
+    last_lcd_update = 0
+    try:
+        while True:
+            sensor.update()
+            if sensor.finger_detected:
+                bpm = f"{sensor.bpm:.0f}" if sensor.bpm else "--"
+                spo2 = f"{sensor.spo2:.0f}" if sensor.spo2 else "--"
+                print(f"BPM: {bpm}   SpO2: {spo2}%", end="\r")
+
+                now = time.time()
+                if now - last_lcd_update >= LCD_REFRESH_INTERVAL:
+                    last_lcd_update = now
+                    lcd.log(f"BPM:{bpm:<2} SpO2:{spo2}%", "FINGER OK", duration=LCD_REFRESH_INTERVAL)
+            else:
+                print("Waiting for finger...            ", end="\r")
+                now = time.time()
+                if now - last_lcd_update >= LCD_REFRESH_INTERVAL:
+                    last_lcd_update = now
+                    lcd.log("VITALS", "PLACE FINGER...", duration=LCD_REFRESH_INTERVAL)
+            time.sleep(0.05)
+    except KeyboardInterrupt:
+        print("\nStopped.")
+    finally:
+        sensor.close()
+        if own_lcd:
+            lcd.close()
+
+
+if __name__ == "__main__":
+    run_standalone()

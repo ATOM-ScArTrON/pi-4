@@ -6,6 +6,8 @@ import time
 from gpiozero import DigitalInputDevice
 from config import SOUND_PIN
 
+LCD_REFRESH_INTERVAL = 1.0  # throttle LCD writes independent of terminal print rate
+
 class SoundSensor:
     def __init__(self, pin=SOUND_PIN):
         self.pin = pin
@@ -31,13 +33,37 @@ class SoundSensor:
             except Exception:
                 pass
 
-if __name__ == "__main__":
-    print(f"Testing SoundSensor module on GPIO{SOUND_PIN}...")
-    snd = SoundSensor()
-    print("Clap or speak into the sensor:")
-    for _ in range(20):
-        print(f"Sound state: {snd.status}", end="\r")
-        time.sleep(0.1)
-    print("\nSoundSensor test complete.")
-    snd.close()
 
+def run_standalone(lcd=None):
+    """Continuously print live loud/quiet status until Ctrl+C. Mirrors state to LCD (throttled)."""
+    sensor = SoundSensor()
+
+    own_lcd = lcd is None
+    if own_lcd:
+        from modules.display import Display
+        lcd = Display()
+
+    print(f"[Sound Sensor] Monitoring GPIO{SOUND_PIN}. Clap or speak if sensor doesn't show loud readings. Press Ctrl+C to stop.\n")
+    last_lcd_update = 0
+    try:
+        while True:
+            state = sensor.status
+            print(f"Sound state: {state}", end="\r")
+
+            now = time.time()
+            if now - last_lcd_update >= LCD_REFRESH_INTERVAL:
+                last_lcd_update = now
+                label = "LOUD" if state == "S:L" else "QUIET"
+                lcd.log("SOUND SENSOR", label, duration=LCD_REFRESH_INTERVAL)
+
+            time.sleep(0.1)
+    except KeyboardInterrupt:
+        print("\nStopped.")
+    finally:
+        sensor.close()
+        if own_lcd:
+            lcd.close()
+
+
+if __name__ == "__main__":
+    run_standalone()

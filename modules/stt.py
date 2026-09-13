@@ -1,8 +1,3 @@
-"""
-Speech-to-Text (STT) engine using Vosk neural speech model and PipeWire audio stream.
-Continuously captures speech from Bluetooth earbuds or microphone and transcribes arbitrary speech.
-"""
-
 import os
 import json
 import time
@@ -37,7 +32,6 @@ class SpeechToText:
         try:
             print(f"[STT] Loading Vosk model from {self.model_path}...")
             self.model = Model(self.model_path)
-            # Open recognition (transcribes arbitrary speech without restrictive grammar)
             self.recognizer = KaldiRecognizer(self.model, self.sample_rate)
             print("[STT] Vosk model loaded successfully.")
         except Exception as e:
@@ -45,7 +39,6 @@ class SpeechToText:
             self.model = None
 
     def start(self):
-        """Starts background PipeWire audio capture and STT processing thread."""
         if not self.model or self.thread:
             return
 
@@ -100,34 +93,33 @@ class SpeechToText:
             pass
 
     def get_transcript(self, block=False):
-        """Returns the next transcribed sentence from the queue, or None."""
         try:
             return self.transcript_queue.get(block=block)
         except queue.Empty:
             return None
 
     def get_command(self):
-        """Helper to match command keywords in newly transcribed sentences."""
         text = self.get_transcript(block=False)
         if not text:
             return None
 
-        tokens = text.lower().split()
+        tokens = set(text.lower().split())
         now = time.time()
+        
         if now - self.last_command_time < 2.0:
             return None
 
-        if "send" in tokens or "transmit" in tokens:
+        if {"send", "transmit"}.intersection(tokens):
             self.last_command_time = now
             return "send"
-        elif "receive" in tokens or "listen" in tokens:
+        if {"receive", "listen"}.intersection(tokens):
             self.last_command_time = now
             return "receive"
-        elif "capture" in tokens or "photo" in tokens or "picture" in tokens or "yes" in tokens:
+        if {"capture", "photo", "picture", "yes"}.intersection(tokens):
             self.last_command_time = now
             return "capture"
 
-        return text  # Return full text if not a reserved command
+        return text
 
     def stop(self):
         self.stop_event.set()
@@ -140,17 +132,39 @@ class SpeechToText:
             self.thread.join(timeout=1.0)
         self.thread = None
 
-if __name__ == "__main__":
-    print("Testing SpeechToText module. Speak into microphone/earbuds:")
+
+def run_standalone(lcd=None):
+    """Continuously transcribe speech and print it until Ctrl+C. Mirrors each heard phrase to LCD."""
     stt = SpeechToText()
+
+    own_lcd = lcd is None
+    if own_lcd:
+        from modules.display import Display
+        lcd = Display()
+
+    if not stt.model:
+        print("[STT] Cannot start - Vosk model not loaded (see error above).")
+        lcd.log("STT FAILED", "NO MODEL", duration=3.0)
+        if own_lcd:
+            lcd.close()
+        return
+
     stt.start()
+    print("[STT] Listening. Speak into the mic. Press Ctrl+C to stop.\n")
+    lcd.log("STT READY", "LISTENING...", duration=2.0)
     try:
-        for _ in range(15):
-            t = stt.get_transcript(block=False)
-            if t:
-                print(f">> Recognized: '{t}'")
-            time.sleep(1.0)
+        while True:
+            text = stt.get_transcript(block=True)
+            if text:
+                print(f"Heard: {text}")
+                lcd.log("HEARD:", text[:16], duration=2.5)
+    except KeyboardInterrupt:
+        print("\nStopped.")
     finally:
         stt.stop()
-    print("STT test complete.")
+        if own_lcd:
+            lcd.close()
 
+
+if __name__ == "__main__":
+    run_standalone()

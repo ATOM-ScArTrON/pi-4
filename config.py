@@ -28,6 +28,12 @@ RECEIVED_DIR = os.environ.get(
     os.path.join(USER_HOME, "received_lora_files")
 )
 
+# =========================================================
+# BLUETOOTH
+# =========================================================
+BT_CHECK_INTERVAL = 5.0   # seconds between connection status polls
+BT_AUTOCONNECT = os.environ.get("BT_AUTOCONNECT", "1") == "1"
+
 # Audio capture device (PipeWire default source, or override via env)
 AUDIO_DEVICE = os.environ.get("AUDIO_DEVICE", "@DEFAULT_SOURCE@")
 SAMPLE_RATE = 16000
