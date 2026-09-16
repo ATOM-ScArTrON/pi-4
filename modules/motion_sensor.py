@@ -3,6 +3,9 @@ MPU-6050 6-axis accelerometer driver using smbus2.
 """
 import time
 import math
+from modules.terminal import display_on_terminal
+
+print = display_on_terminal
 from smbus2 import SMBus
 from config import I2C_BUS, MPU6050_ADDR, TILT_THRESHOLD, MPU_INTERVAL
 

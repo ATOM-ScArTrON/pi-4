@@ -4,6 +4,9 @@ NEO-6M GPS receiver module over UART serial.
 import time
 import serial
 import pynmea2
+from modules.terminal import display_on_terminal
+
+print = display_on_terminal
 from config import GPS_PORT, GPS_BAUD, GPS_INTERVAL
 
 LCD_REFRESH_INTERVAL = 1.0  # throttle LCD writes independent of terminal print rate

@@ -12,6 +12,9 @@ import re
 import time
 import threading
 import subprocess
+from modules.terminal import display_on_terminal
+
+print = display_on_terminal
 
 try:
     from config import BT_CHECK_INTERVAL, BT_AUTOCONNECT

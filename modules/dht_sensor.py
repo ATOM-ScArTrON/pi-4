@@ -4,6 +4,9 @@ DHT11 Temperature and Humidity sensor driver.
 import time
 import board
 import adafruit_dht
+from modules.terminal import display_on_terminal
+
+print = display_on_terminal
 from config import DHT_PIN, DHT_INTERVAL
 
 class DHTSensor:

@@ -4,6 +4,10 @@ Shared status-printing helpers used across run_standalone() loops
 doesn't hand-roll its own copy of the same TTS/STT status printout.
 """
 
+from modules.terminal import display_on_terminal
+
+print = display_on_terminal
+
 def print_audio_status(tts, stt, lcd=None):
     """Prints TTS/STT mute state to terminal and mirrors it to the LCD.
     Returns (tts_state, stt_state) in case a caller wants to log/reuse them."""

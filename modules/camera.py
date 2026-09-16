@@ -7,6 +7,9 @@ import time
 import io
 import queue
 import threading
+from modules.terminal import display_on_terminal
+
+print = display_on_terminal
 from picamera2 import Picamera2
 from config import PHOTO_DIR, CAMERA_COOLDOWN
 

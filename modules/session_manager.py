@@ -20,6 +20,9 @@ Core ideas:
 import time
 import threading
 import importlib
+from modules.terminal import display_on_terminal
+
+print = display_on_terminal
 
 from modules.module_registry import (
     REGISTRY, MOD_CONTINUOUS, MOD_SERVICE, find_module_by_alias,

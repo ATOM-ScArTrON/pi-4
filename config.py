@@ -53,6 +53,20 @@ MPU6050_ADDR = 0x68       # 6-axis accelerometer & gyroscope
 LORA_PORT = os.environ.get("LORA_PORT", "/dev/serial0")
 LORA_BAUD = 9600
 
+# Mesh encryption. Set MESH_KEY_HEX to a shared 32-hex-character key on both
+# nodes. The development default keeps the standalone demo usable; replace it
+# before deploying a real device.
+MESH_KEY_HEX = os.environ.get("MESH_KEY_HEX", "00112233445566778899aabbccddeeff")
+try:
+    MESH_KEY = bytes.fromhex(MESH_KEY_HEX)
+except ValueError as exc:
+    raise ValueError("MESH_KEY_HEX must contain hexadecimal characters") from exc
+if len(MESH_KEY) != 16:
+    raise ValueError("MESH_KEY_HEX must encode exactly 16 bytes")
+MESH_NONCE_FILE = os.environ.get(
+    "MESH_NONCE_FILE", os.path.join(USER_HOME, ".wearable_mesh_nonce")
+)
+
 # NEO-6M GPS receiver UART (typically UART3 on Pi 4 /dev/ttyAMA3)
 GPS_PORT = os.environ.get("GPS_PORT", "/dev/ttyAMA3")
 GPS_BAUD = 9600
@@ -89,4 +103,3 @@ LORA_COOLDOWN = 3.0       # Cooldown between consecutive LoRa transmissions
 # Ensure storage directories exist
 os.makedirs(PHOTO_DIR, exist_ok=True)
 os.makedirs(RECEIVED_DIR, exist_ok=True)
-

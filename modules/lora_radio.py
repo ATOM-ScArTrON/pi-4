@@ -7,14 +7,20 @@ import queue
 import threading
 import serial
 from gpiozero import OutputDevice
-from config import LORA_PORT, LORA_BAUD, LORA_M0_PIN, LORA_M1_PIN
+from config import LORA_PORT, LORA_BAUD, LORA_M0_PIN, LORA_M1_PIN, MESH_KEY, MESH_NONCE_FILE
 from modules.lora_protocol import LoRaProtocol, LoRaAssembler
+from modules.mesh_crypto import NonceManager
 from modules.status_utils import print_audio_status
+from modules.terminal import display_on_terminal
+
+print = display_on_terminal
 
 class LoRaRadio:
     def __init__(self, port=LORA_PORT, baudrate=LORA_BAUD):
         self.ser = self.m0 = self.m1 = self.listener_thread = None
-        self.assembler = LoRaAssembler()
+        self.protocol = LoRaProtocol(MESH_KEY, nonce_manager=NonceManager(MESH_NONCE_FILE))
+        self.assembler = LoRaAssembler(self.protocol)
+        self._rx_buffer = bytearray()
         self.rx_queue = queue.Queue()
         self.stop_event = threading.Event()
         
@@ -37,19 +43,33 @@ class LoRaRadio:
         while not self.stop_event.is_set():
             if self.ser and self.ser.is_open and self.ser.in_waiting > 0:
                 try:
-                    for raw_line in self.ser:
-                        payload = self.assembler.process_packet(raw_line.decode("utf-8", errors="ignore"))
+                    self._rx_buffer.extend(self.ser.read(self.ser.in_waiting))
+                    while self._rx_buffer:
+                        body_length = self._rx_buffer[0]
+                        frame_length = body_length + 1
+                        if body_length == 0 or body_length > 120:
+                            del self._rx_buffer[0]
+                            continue
+                        if len(self._rx_buffer) < frame_length:
+                            break
+                        frame = bytes(self._rx_buffer[:frame_length])
+                        del self._rx_buffer[:frame_length]
+                        payload = self.assembler.process_frame(frame)
                         if payload:
                             self.rx_queue.put(payload)
-                            if callback: callback(payload)
-                except Exception: pass
+                            if callback:
+                                callback(payload)
+                except Exception:
+                    pass
             time.sleep(0.02)
 
     def send_packets(self, packets, delay_between=0.08):
         if not self.ser or not self.ser.is_open: return False
         try:
             for p in packets:
-                self.ser.write(p.encode("utf-8"))
+                if not isinstance(p, (bytes, bytearray)):
+                    raise TypeError("LoRa packets must be binary frames")
+                self.ser.write(p)
                 self.ser.flush()
                 if len(packets) > 1: time.sleep(delay_between)
             return True
@@ -57,17 +77,17 @@ class LoRaRadio:
             print(f"[LoRa TX Error]: {e}")
             return False
 
-    def send_vitals(self, vitals_dict):
-        return self.send_packets(LoRaProtocol.encode_vitals(vitals_dict))
+    def send_telemetry(self, telemetry_dict):
+        return self.send_packets(self.protocol.encode_telemetry(telemetry_dict))
 
     def send_text(self, text):
-        return self.send_packets(LoRaProtocol.encode_text(text))
+        return self.send_packets(self.protocol.encode_text(text))
 
     def send_image_thumbnail(self, jpeg_bytes):
-        return self.send_packets(LoRaProtocol.encode_binary(jpeg_bytes, "IMG"))
+        return self.send_packets(self.protocol.encode_binary(jpeg_bytes, "IMG"))
 
     def send_audio_clip(self, audio_bytes):
-        return self.send_packets(LoRaProtocol.encode_binary(audio_bytes, "AUD"))
+        return self.send_packets(self.protocol.encode_binary(audio_bytes, "AUD"))
 
     def get_received(self):
         try: return self.rx_queue.get_nowait()
@@ -89,7 +109,6 @@ def run_standalone(lcd=None):
     from modules.stt import SpeechToText
     from modules.tts import TextToSpeech
     from modules.session_manager import SessionManager
-    from modules.lora_protocol import LoRaProtocol
 
     sm = SessionManager(primary="lora", lcd=lcd)
     lcd = sm.lcd
@@ -135,10 +154,9 @@ def run_standalone(lcd=None):
             tts.speak(f"Received transmission of type {p_type}")
 
     def _send_text_message(text, source):
-        """Transmit a chat-style text message, mirroring the outcome to
-        terminal/LCD/TTS the same way _on_packet() does for RX."""
-        print(f"\n[LoRa TX Attempt]: Source={source} | Text='{text}'")
-        sent = radio.send_text(text)
+        """Compatibility helper for the explicit chat-message escape."""
+        from modules.chat_mode import send_chat_message
+        sent = send_chat_message(radio, text, source)
         if sent:
             print(f"[LoRa TX Packet Sent]: Type=TEXT | Data={{'text': '{text}'}}")
             lcd.log("TX MSG", text[:16], duration=2.5)
@@ -162,9 +180,9 @@ def run_standalone(lcd=None):
                 continue
 
             if isinstance(data, (bytes, bytearray)):
-                packets = LoRaProtocol.encode_binary(data, ptype)
+                packets = radio.protocol.encode_binary(data, ptype)
             else:
-                packets = LoRaProtocol.encode_reading(ptype, data)
+                packets = radio.protocol.encode_reading(ptype, data)
 
             print(f"\n[LoRa TX Attempt]: Type={ptype} | Source={name} | Data={data if not isinstance(data, (bytes, bytearray)) else f'<{len(data)} bytes>'}")
             sent = radio.send_packets(packets)
@@ -308,7 +326,7 @@ def run_standalone(lcd=None):
     print(f"[LoRa] Active on {LORA_PORT}.")
     print("Commands: '/send' '/receive' (typed, need the / prefix) or say 'send'/'receive' (voice, whole phrase).")
     print("Say/type a module name ('dht', 'camera', ...) to activate it in the background.")
-    print("Anything else typed/spoken is sent as a chat message. Press Ctrl+C to exit.\n")
+    print("Use option 12 for chat messages. Press Ctrl+C to exit.\n")
     lcd.log("LORA READY", "VOICE / TYPE", duration=2.0)
     tts.speak("LoRa radio ready.")
 
@@ -354,7 +372,7 @@ def run_standalone(lcd=None):
                                 lcd.log("LORA RX", "NO UNREAD MSGS", duration=2.5)
                                 tts.speak("No unread packets. Listening for incoming signals.")
                         else:
-                            _send_text_message(text, source)
+                            print("[LoRa] Unrecognized input. Use '/send', '/receive', or Chat Mode.")
 
             time.sleep(0.05)
 

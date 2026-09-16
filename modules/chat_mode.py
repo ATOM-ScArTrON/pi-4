@@ -15,6 +15,16 @@ import sys
 import time
 import queue
 import threading
+from modules.status_utils import print_audio_status
+from modules.terminal import display_on_terminal
+
+print = display_on_terminal
+
+
+def send_chat_message(radio, text, source="CHAT"):
+    """Send a chat payload through the chat-mode boundary."""
+    print(f"\n[Chat TX ({source})]: {text}")
+    return radio.send_text(text)
 
 
 def run_standalone(lcd=None):
@@ -74,8 +84,7 @@ def run_standalone(lcd=None):
     # --- TX ---------------------------------------------------------------
 
     def _send(text, source):
-        print(f"\n[Chat TX ({source})]: {text}")
-        sent = radio.send_text(text)
+        sent = send_chat_message(radio, text, source)
         if sent:
             lcd.log("YOU:", text[:16], duration=2.5)
         else:
@@ -109,6 +118,8 @@ def run_standalone(lcd=None):
             return "UNMUTE_STT"
         if body in ("exit", "quit"):
             return "EXIT"
+        if body == "status":
+            return "STATUS"
         return None
 
     def _resolve_voice_escape(text, source):
@@ -168,6 +179,8 @@ def run_standalone(lcd=None):
                     cmd = _parse_command(text, source)
                     if cmd == "EXIT":
                         break
+                    elif cmd == "STATUS":
+                        print_audio_status(tts, stt, lcd)
                     else:
                         _send(text, source)
 

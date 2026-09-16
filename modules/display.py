@@ -3,6 +3,9 @@
 """
 import time
 import threading
+from modules.terminal import display_on_terminal
+
+print = display_on_terminal
 from RPLCD.i2c import CharLCD
 from config import LCD_ADDR, I2C_BUS, LCD_CYCLE_INTERVAL
 
@@ -79,7 +82,7 @@ class Display:
             print(f"[STATUS] {tag}")
         self.show_banner(line1, line2, duration=duration)
 
-    def update_cyclic(self, vitals=None, dht=None, motion=None, gps=None):
+    def update_cyclic(self, vitals=None, dht=None, motion=None, gps=None, sound=None):
         now = time.time()
         if now < self.banner_expiry or now - self.last_refresh < 0.4: return
         
@@ -93,7 +96,7 @@ class Display:
             l1 = "Place Finger..." if vitals and not getattr(vitals, 'finger_detected', True) else l1
             t_str = f"T:{dht.temp:.1f}C" if getattr(dht, 'temp', None) is not None else "T:--C"
             h_str = f"H:{dht.humidity:.1f}%" if getattr(dht, 'humidity', None) is not None else "H:--%"
-            s_str = getattr(dht, 'sound_status', "S:Q")
+            s_str = getattr(sound, 'status', "S:Q")
             self.write_lines(l1, f"{t_str:<5} {h_str:<5} {s_str}")
 
         elif self.current_page == 1:

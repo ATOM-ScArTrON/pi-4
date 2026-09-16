@@ -17,6 +17,9 @@ import importlib
 from gpiozero import Button
 from modules.bluetooth_manager import BluetoothManager
 from modules.status_utils import print_audio_status
+from modules.terminal import display_on_terminal
+
+print = display_on_terminal
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -40,6 +43,7 @@ MENU = {
     "11": ("Bluetooth Manager",          "modules.bluetooth_manager"),
     "12": ("LoRa Chat Mode",             "modules.chat_mode"),
     "13": ("Full Integrated System",     None),
+    "14": ("Run Secure Mesh Payload Tests", "tests.mesh_test"),
     "0":  ("Exit",                       None),
 }
 
@@ -80,7 +84,7 @@ def parse_action(text):
     return "TEXT"
 
 
-def run_full_system():
+def _run_full_system():
     """The original all-sensors-at-once coordinator loop."""
     from modules.display import Display
     from modules.dht_sensor import DHTSensor
@@ -201,7 +205,7 @@ def run_full_system():
         }
         print(f"\n[LoRa TX Packet Attempt]: Type=VITALS | Source={source} | Data={payload}")
         lcd.show_banner("LORA TX", f"B:{int(payload['BPM'])} S:{int(payload['SPO2'])}%", duration=2.5)
-        success = lora.send_vitals(payload)
+        success = lora.send_telemetry(payload)
 
         if success:
             print("[LoRa TX Packet Sent]: Type=VITALS")
@@ -221,15 +225,18 @@ def run_full_system():
             (not camera.picam2,       "CAMERA FAILED",   "CHECK RIBBON"),
             (not lora.ser,            "LORA FAILED",     "CHECK PORT"),
             (stt.model is None,       "STT FAILED",      "NO MODEL"),
-            (tts.engine == "dummy",   "TTS FAILED",      "NO ENGINE"),
+            (tts.engine == tts.DUMMY_ENGINE, "TTS FAILED", "NO ENGINE"),
         ]
         failures = [(l1, l2) for cond, l1, l2 in checks if cond]
 
         if not failures:
+            display_on_terminal("[Startup Health] All subsystem checks passed.")
             lcd.log("ALL SYSTEMS OK", "", duration=2.0)
             return
 
+        display_on_terminal("[Startup Health] Failures detected:")
         for l1, l2 in failures:
+            display_on_terminal(f"  - {l1}: {l2}")
             lcd.log(l1, l2, duration=2.0)
             time.sleep(2.2)
 
@@ -240,6 +247,7 @@ def run_full_system():
         f"Connected to {name}." if ok else "No headset found, using onboard audio."
     ))
 
+    lcd.log("SYSTEM OPERATIONAL", "READY", duration=2.0)
     print("\n--- SYSTEM OPERATIONAL ---")
     print("Triggers (Speak or Type): 'click'/'capture'/'photo' | 'send' | 'receive'")
     print("Hardware Pins          : Photo (Pin 21) | TX (Pin 20) | RX (Pin 16)\n")
@@ -251,8 +259,6 @@ def run_full_system():
             motion.update()
             vitals.update()
             bt.is_connected()  # polls BT status + re-routes audio if device changed
-
-            dht.sound_status = sound.status
 
             # --- Process Voice & Typed Inputs ---
             raw_voice_cmd = stt.get_command()
@@ -285,7 +291,7 @@ def run_full_system():
                     trigger_lora_tx(source=f"VOICE '{raw_voice_cmd}'")
                 elif action == "RECEIVE":
                     lcd.show_banner("LORA RX", "LISTENING...", duration=3.0)
-                    tts.speak("Listening for incoming transmissions.")
+                    tts.speak("Listening for incoming messages.")
                 elif action == "STATUS":
                     print_audio_status(tts, stt, lcd)
                     bt_state = bt.name if bt.is_connected() else "none"
@@ -303,7 +309,8 @@ def run_full_system():
                     lcd.log("BT:" + bt_state[:12].upper(), "DOWN:" + (",".join(failed)[:11] if failed else "NONE"), duration=2.0)
                 else:
                     lcd.show_banner("VOICE TXT", raw_voice_cmd[:16], duration=3.0)
-                    lora.send_text(raw_voice_cmd)
+                    from modules.chat_mode import send_chat_message
+                    send_chat_message(lora, raw_voice_cmd, "FULL SYSTEM VOICE")
 
             # Handle Typed Command
             if raw_typed_cmd:
@@ -328,10 +335,11 @@ def run_full_system():
                     trigger_lora_tx(source=f"TYPED '{raw_typed_cmd}'")
                 elif action == "RECEIVE":
                     lcd.show_banner("LORA RX", "LISTENING...", duration=3.0)
-                    tts.speak("Listening for incoming transmissions.")
+                    tts.speak("Listening for incoming messages.")
                 else:
                     lcd.show_banner("TYPED TXT", raw_typed_cmd[:16], duration=3.0)
-                    lora.send_text(raw_typed_cmd)
+                    from modules.chat_mode import send_chat_message
+                    send_chat_message(lora, raw_typed_cmd, "FULL SYSTEM TYPED")
 
             # --- Physical Button Triggers ---
             if btn_photo.is_pressed:
@@ -341,7 +349,7 @@ def run_full_system():
             elif btn_rx.is_pressed:
                 lcd.show_banner("LORA RX", "LISTENING...", duration=3.0)
 
-            lcd.update_cyclic(vitals=vitals, dht=dht, motion=motion, gps=gps)
+            lcd.update_cyclic(vitals=vitals, dht=dht, motion=motion, gps=gps, sound=sound)
             time.sleep(0.01)
 
     except KeyboardInterrupt:
@@ -355,12 +363,12 @@ def run_full_system():
         dht.close()
         sound.close()
         gps.close()
-        lcd.show_banner("SYSTEM STOPPED", "GOODBYE", duration=1.5)
-        time.sleep(1.0)
-        lcd.close()
         btn_photo.close()
         btn_tx.close()
         btn_rx.close()
+        lcd.show_banner("SYSTEM STOPPED", "GOODBYE", duration=1.5)
+        time.sleep(1.0)
+        lcd.close()
         print("Hardware shutdown cleanly complete.")
 
 
@@ -380,6 +388,7 @@ def main():
             break
 
         elif choice == "13":
+            from modules.full_system import run_full_system
             run_full_system()
 
         else:

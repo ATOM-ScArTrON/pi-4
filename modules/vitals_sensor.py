@@ -5,6 +5,9 @@ Computes live Heart Rate (BPM) and Blood Oxygen Saturation (SpO2%) with finger d
 
 import time
 import collections
+from modules.terminal import display_on_terminal
+
+print = display_on_terminal
 from smbus2 import SMBus
 from config import I2C_BUS, MAX30102_ADDR, FINGER_THRESHOLD
 

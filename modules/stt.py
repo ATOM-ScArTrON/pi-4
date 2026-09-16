@@ -4,6 +4,9 @@ import time
 import queue
 import threading
 import subprocess
+from modules.terminal import display_on_terminal
+
+print = display_on_terminal
 from vosk import Model, KaldiRecognizer
 from config import VOSK_MODEL_PATH, SAMPLE_RATE, AUDIO_DEVICE
 

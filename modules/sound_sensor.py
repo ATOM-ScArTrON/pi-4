@@ -4,6 +4,9 @@ Digital sound sensor driver. Detects ambient noise thresholds (Quiet vs Loud).
 
 import time
 from gpiozero import DigitalInputDevice
+from modules.terminal import display_on_terminal
+
+print = display_on_terminal
 from config import SOUND_PIN
 
 LCD_REFRESH_INTERVAL = 1.0  # throttle LCD writes independent of terminal print rate

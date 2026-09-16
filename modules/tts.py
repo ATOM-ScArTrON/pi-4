@@ -7,8 +7,13 @@ import os
 import shutil
 import threading
 import subprocess
+from modules.terminal import display_on_terminal
+
+print = display_on_terminal
 
 class TextToSpeech:
+    DUMMY_ENGINE = "dummy"
+
     def __init__(self):
         self.engine = self._detect_engine()
         self.enabled = True
@@ -23,7 +28,7 @@ class TextToSpeech:
             return "espeak"
         if shutil.which("spd-say"):
             return "spd-say"
-        return "dummy"
+        return self.DUMMY_ENGINE
 
     def speak(self, text, block=False):
         if not text or not self.enabled:
