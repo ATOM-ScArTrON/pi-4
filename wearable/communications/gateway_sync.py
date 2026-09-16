@@ -11,8 +11,13 @@ from wearable.ui.terminal import display_on_terminal
 print = display_on_terminal
 
 
-PRIORITY = {"DHT": 10, "SND": 10, "MOT": 10, "GPS": 20, "VIT": 50,
-            "IMG": 60, "TEXT": 60, "TEL": 50}
+PRIORITY = {
+    "DHT": 10, "SND": 10, "MOT": 10,
+    "GPS": 20,
+    "VIT": 50, "TEL": 50,
+    "TEXT": 60, "IMAGE": 60, "AUDIO": 60,
+    "ALERT": 100
+}
 
 
 class GatewaySyncQueue:
@@ -29,7 +34,7 @@ class GatewaySyncQueue:
         self._rotate()
 
     def _rotate(self):
-        if not os.path.exists(self.queue_path) or os.path.getsize(self.queue_path) <= self.max_bytes:
+        if not os.path.exists(self.queue_path) or os.path.getsize(self.queue_path) < 0.9 * self.max_bytes:
             return
         with open(self.queue_path, "r", encoding="utf-8") as stream:
             records = [json.loads(line) for line in stream if line.strip()]

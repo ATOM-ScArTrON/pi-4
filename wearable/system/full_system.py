@@ -53,11 +53,10 @@ def run_full_system():
         p_type = payload.get("type")
         print(f"\n[LoRa RX Packet Received]: Type={p_type}")
 
-        if p_type == "VITALS":
-            d = payload.get("data", {})
-            bpm = d.get("BPM", 0)
-            spo2 = d.get("SPO2", 0)
-            ts = d.get("TS", "")
+        if p_type in ("TEL", "VIT"):
+            bpm = payload.get("BPM", 0)
+            spo2 = payload.get("SPO2", 0)
+            ts = payload.get("timestamp", "")
             lcd.show_banner(f"RX VIT [{ts}]", f"B:{bpm} S:{spo2}%", duration=4.0)
             tts.speak(f"Received vitals: heart rate {bpm}, oxygen {spo2} percent")
 
@@ -118,12 +117,12 @@ def run_full_system():
             "LON": gps.lon,
             "SATS": gps.sats
         }
-        print(f"\n[LoRa TX Packet Attempt]: Type=VITALS | Source={source} | Data={payload}")
+        print(f"\n[LoRa TX Packet Attempt]: Type=TEL | Source={source} | Data={payload}")
         lcd.show_banner("LORA TX", f"B:{int(payload['BPM'])} S:{int(payload['SPO2'])}%", duration=2.5)
         success = lora.send_telemetry(payload)
 
         if success:
-            print("[LoRa TX Packet Sent]: Type=VITALS")
+            print("[LoRa TX Packet Sent]: Type=TEL")
             tts.speak("Telemetry transmitted.")
         else:
             print("[LoRa TX Failed]: Message send error.")

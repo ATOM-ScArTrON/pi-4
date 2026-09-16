@@ -5,6 +5,10 @@ import os
 import ssl
 import stat
 from urllib.request import Request, urlopen
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.x509.oid import NameOID
 from wearable.ui.terminal import display_on_terminal
 
 print = display_on_terminal
@@ -28,7 +32,52 @@ def validate_keyset(payload):
     return payload
 
 
+def _write_private(path, data):
+    temporary = path + ".tmp"
+    directory = os.path.dirname(path)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+    with open(temporary, "wb") as stream:
+        stream.write(data)
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.chmod(temporary, stat.S_IRUSR | stat.S_IWUSR)
+    os.replace(temporary, path)
+
+
+def _enroll(server_url, device_id, ca_file, cert_file, key_file, gateway=False):
+    key = ec.generate_private_key(ec.SECP256R1())
+    csr = (
+        x509.CertificateSigningRequestBuilder()
+        .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, device_id)]))
+        .sign(key, hashes.SHA256())
+    )
+    context = ssl.create_default_context(cafile=ca_file)
+    request = Request(server_url.rstrip("/") + "/api/enroll",
+                      data=json.dumps({
+                          "device_id": device_id,
+                          "csr_pem": csr.public_bytes(serialization.Encoding.PEM).decode(),
+                          "gateway": gateway,
+                      }).encode("utf-8"),
+                      headers={"Content-Type": "application/json"}, method="POST")
+    with urlopen(request, context=context, timeout=15) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+    certificate = payload.get("certificate_pem")
+    if not certificate:
+        raise ValueError("enrollment response did not contain certificate_pem")
+    _write_private(key_file, key.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.TraditionalOpenSSL,
+        serialization.NoEncryption(),
+    ))
+    _write_private(cert_file, certificate.encode("utf-8"))
+    return payload
+
+
 def provision(server_url, device_id, output_path, ca_file, cert_file, key_file):
+    if not (os.path.exists(cert_file) and os.path.exists(key_file)):
+        _enroll(server_url, device_id, ca_file, cert_file, key_file,
+                gateway=os.environ.get("GATEWAY_ENABLED") == "1")
     context = ssl.create_default_context(cafile=ca_file)
     context.load_cert_chain(cert_file, key_file)
     request = Request(server_url.rstrip("/") + "/device/register",

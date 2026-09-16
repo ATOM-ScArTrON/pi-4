@@ -93,10 +93,10 @@ class AsconCipher:
     # ------------------------------------------------------------------
 
     def _keystream(self, nonce: bytes, length: int) -> bytes:
-        return ascon_xof(self.key + nonce, length)
+        return ascon_xof(b"\x01" + self.key + nonce, length)
 
     def _tag(self, nonce: bytes, ciphertext: bytes) -> bytes:
-        return ascon_xof(self.key + nonce + ciphertext, TAG_SIZE)
+        return ascon_xof(b"\x02" + self.key + nonce + ciphertext, TAG_SIZE)
 
     @staticmethod
     def _xor(a: bytes, b: bytes) -> bytes:
@@ -191,50 +191,136 @@ def unwrap(key: bytes, nonce: bytes, ciphertext: bytes) -> str:
     return AsconCipher(key).decrypt(ciphertext, nonce)
 
 
+BOOT_FORWARD_SKIP = 1000
+EPOCH_DURATION = 3600  # seconds
+
+
 class NonceManager:
-    """Process-local monotonic nonce source: 4-byte epoch + 8-byte counter."""
+    """Persistent, per-peer monotonic nonce source: 4-byte epoch + 8-byte counter.
+
+    Counters are stored per peer so each pairwise channel has independent
+    nonce space. On boot, every counter advances by BOOT_FORWARD_SKIP (+1,000)
+    to guarantee no reuse after sudden power loss. Writes are atomic:
+    stream.flush() + os.fsync() before os.replace().
+    """
 
     def __init__(self, state_file=None):
         self.state_file = state_file
         self._lock = threading.Lock()
-        self.epoch = int(time.time()) & 0xFFFFFFFF
-        self.counter = 0
+        # epoch is shared (wall-clock based); counters are per-peer
+        self.epoch = int(time.time()) // EPOCH_DURATION
+        self.counters: dict[str, int] = {}  # peer_id -> counter
         if state_file:
             self._load()
 
+    def _state_path(self, peer_id):
+        """Return a peer-specific state file path."""
+        if self.state_file is None:
+            return None
+        base, ext = os.path.splitext(self.state_file)
+        safe = peer_id.replace("/", "_").replace("\\", "_")
+        return f"{base}.{safe}{ext}"
+
     def _load(self):
+        """Load persisted counters for all peer state files adjacent to state_file."""
+        if not self.state_file:
+            return
+        base, ext = os.path.splitext(self.state_file)
+        directory = os.path.dirname(self.state_file) or "."
         try:
-            raw = open(self.state_file, "rb").read()
-            if len(raw) == 12:
-                self.epoch, self.counter = struct.unpack(">IQ", raw)
-        except (OSError, ValueError, struct.error):
+            for name in os.listdir(directory):
+                full = os.path.join(directory, name)
+                if not (name.startswith(os.path.basename(base) + ".") and name.endswith(ext)):
+                    continue
+                # extract peer_id from filename
+                prefix = os.path.basename(base) + "."
+                suffix = ext
+                peer_id = name[len(prefix):-len(suffix)] if suffix else name[len(prefix):]
+                try:
+                    raw = open(full, "rb").read()
+                    if len(raw) == 12:
+                        _, counter = struct.unpack(">IQ", raw)
+                        # advance by BOOT_FORWARD_SKIP to handle power-loss nonce reuse
+                        self.counters[peer_id] = counter + BOOT_FORWARD_SKIP
+                except (OSError, struct.error):
+                    pass
+        except OSError:
             pass
 
-    def next(self) -> bytes:
+    def _save(self, peer_id, counter):
+        """Atomically persist the counter for a peer."""
+        path = self._state_path(peer_id)
+        if path is None:
+            return
+        directory = os.path.dirname(path)
+        if directory:
+            os.makedirs(directory, exist_ok=True)
+        temp = path + ".tmp"
+        with open(temp, "wb") as stream:
+            stream.write(struct.pack(">IQ", self.epoch, counter))
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temp, path)
+
+    def set_epoch(self, epoch):
+        """Use the current provisioned/GPS-derived epoch for new nonces."""
         with self._lock:
-            self.counter += 1
-            if self.counter > 0xFFFFFFFFFFFFFFFF:
+            self.epoch = int(epoch) & 0xFFFFFFFF
+
+    def next(self, peer_id: str = "default") -> bytes:
+        """Return the next nonce bytes for the given peer."""
+        with self._lock:
+            counter = self.counters.get(peer_id, 0) + 1
+            if counter > 0xFFFFFFFFFFFFFFFF:
                 raise OverflowError("nonce counter exhausted")
-            nonce = struct.pack(">IQ", self.epoch, self.counter)
-            if self.state_file:
-                directory = os.path.dirname(self.state_file)
-                if directory:
-                    os.makedirs(directory, exist_ok=True)
-                temp = self.state_file + ".tmp"
-                with open(temp, "wb") as stream:
-                    stream.write(nonce)
-                os.replace(temp, self.state_file)
+            self.counters[peer_id] = counter
+            nonce = struct.pack(">IQ", self.epoch, counter)
+            self._save(peer_id, counter)
             return nonce
 
 
 class ReplayGuard:
-    """Small replay cache for already accepted nonces."""
+    """Replay guard that persists highest-seen nonce per peer to disk.
 
-    def __init__(self, max_entries=4096):
+    On accept_highest(), if the incoming nonce is strictly newer than
+    the stored maximum it is accepted and the new maximum is atomically
+    written to disk (flush + fsync before replace) so the guard survives
+    a restart.
+    """
+
+    _GUARD_FILE = os.path.expanduser("~/.wearable_replay_guard.json")
+
+    def __init__(self, max_entries=4096, guard_file=None):
         self.max_entries = max_entries
+        self._guard_file = guard_file or self._GUARD_FILE
         self._seen = set()
-        self._highest = {}
+        self._highest: dict[str, int] = {}
         self._lock = threading.Lock()
+        self._load()
+
+    def _load(self):
+        try:
+            with open(self._guard_file, "r", encoding="utf-8") as stream:
+                data = json.load(stream)
+            if isinstance(data, dict):
+                self._highest = {k: int(v) for k, v in data.items()}
+        except (OSError, json.JSONDecodeError, ValueError):
+            pass
+
+    def _save(self):
+        """Atomically persist _highest to disk."""
+        temp = self._guard_file + ".tmp"
+        try:
+            directory = os.path.dirname(self._guard_file)
+            if directory:
+                os.makedirs(directory, exist_ok=True)
+            with open(temp, "w", encoding="utf-8") as stream:
+                json.dump(self._highest, stream)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temp, self._guard_file)
+        except OSError:
+            pass
 
     def accept(self, nonce: bytes) -> bool:
         with self._lock:
@@ -262,7 +348,9 @@ class ReplayGuard:
         return int.from_bytes(nonce, "big")
 
     def accept_highest(self, peer_id, nonce: bytes) -> bool:
-        """Accept only a strictly newer epoch/counter for this peer."""
+        """Accept only a strictly newer epoch/counter for this peer.
+        Persists the new maximum to disk when accepted.
+        """
         value = self._counter(nonce)
         if value is None:
             return False
@@ -271,4 +359,5 @@ class ReplayGuard:
             if value <= previous:
                 return False
             self._highest[peer_id] = value
+            self._save()
             return True

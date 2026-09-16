@@ -91,7 +91,7 @@ def ascon_xof(message: bytes, hashlength: int = 32) -> bytes:
     """
     a, b, rate = 12, 12, 8  # Ascon-Xof uses a=b=12, rate=8 bytes
 
-    iv = bytes([0, rate * 8, a, a - b, 0]) + _zero_bytes(32)
+    iv = bytes([0, rate * 8, a, a - b, 0]) + _zero_bytes(35)
     S = bytes_to_state(iv)
     ascon_permutation(S, a)
 

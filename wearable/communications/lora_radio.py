@@ -11,6 +11,7 @@ from config import (LORA_PORT, LORA_BAUD, LORA_M0_PIN, LORA_M1_PIN,
                     MESH_NONCE_FILE, MISSION_KEYSET_PATH, PEER_ID)
 from wearable.communications.lora_protocol import LoRaProtocol, LoRaAssembler
 from wearable.crypto.mesh_crypto import NonceManager
+from wearable.system.epoch_clock import EpochClock
 from wearable.ui.status import print_audio_status
 from wearable.ui.terminal import display_on_terminal
 from config import (GATEWAY_ENABLED, GATEWAY_QUEUE_PATH, DEVICE_ID,
@@ -22,7 +23,7 @@ class LoRaRadio:
     def __init__(self, port=LORA_PORT, baudrate=LORA_BAUD, peer_id=PEER_ID):
         self.ser = self.m0 = self.m1 = self.listener_thread = None
         self.peer_id = peer_id
-        self.keyset, self.broadcast_key, self.key_epoch = self._load_keyset()
+        self.keyset, self.broadcast_key, self.key_epoch, epoch_start_time = self._load_keyset()
         self.key = self.keyset.get(peer_id) or next(iter(self.keyset.values()), None)
         if self.key is None:
             raise RuntimeError(
@@ -30,7 +31,8 @@ class LoRaRadio:
             )
         self.protocol = LoRaProtocol(self.key, keyset=self.keyset, peer_id=peer_id,
                                      broadcast_key=self.broadcast_key,
-                                     nonce_manager=NonceManager(MESH_NONCE_FILE))
+                                     nonce_manager=NonceManager(MESH_NONCE_FILE),
+                                     epoch_clock=EpochClock(epoch_start_time))
         self.assembler = LoRaAssembler(self.protocol)
         self.gateway_queue = None
         if GATEWAY_ENABLED:
@@ -61,7 +63,10 @@ class LoRaRadio:
                 epoch = payload.get("key_epoch", payload.get("mission_epoch_id", 0))
                 if not isinstance(epoch, int) or epoch < 0:
                     raise ValueError("invalid key epoch")
-                return keyset, broadcast, epoch
+                epoch_start_time = payload.get("epoch_start_time")
+                if not isinstance(epoch_start_time, (int, float)) or epoch_start_time <= 0:
+                    raise ValueError("invalid epoch_start_time")
+                return keyset, broadcast, epoch, epoch_start_time
         except (OSError, KeyError, TypeError, ValueError):
             pass
         raise RuntimeError(
@@ -171,18 +176,15 @@ def run_standalone(lcd=None):
     def _on_packet(payload):
         p_type = payload.get("type")
         print(f"\n[LoRa RX Packet Received]: Type={p_type} | Data={payload}")
-        if p_type == "VITALS":
-            d = payload.get("data", {})
-            bpm = d.get("BPM", 0)
-            spo2 = d.get("SPO2", 0)
+        if p_type == "TEL":
+            bpm = payload.get("BPM", 0)
+            spo2 = payload.get("SPO2", 0)
             lcd.log(f"RX B:{bpm}", f"S:{spo2}%", duration=3.0)
             tts.speak(f"Received vitals: heart rate {bpm}, oxygen {spo2} percent")
-        elif p_type == "READING":
-            sensor = payload.get("sensor", "?")
-            d = payload.get("data", {})
-            summary = ", ".join(f"{k}:{v}" for k, v in d.items() if k not in ("T", "TS"))
-            lcd.log(f"RX {sensor}", summary[:16], duration=3.0)
-            tts.speak(f"Received {sensor} reading: {summary}")
+        elif p_type in ("DHT", "SND", "MOT", "GPS", "VIT"):
+            summary = ", ".join(f"{k}:{v}" for k, v in payload.items() if k not in ("type", "timestamp"))
+            lcd.log(f"RX {p_type}", summary[:16], duration=3.0)
+            tts.speak(f"Received {p_type} reading: {summary}")
         elif p_type == "TEXT":
             msg = str(payload.get("text", ""))
             lcd.log("RX MSG", msg[:16], duration=3.0)
@@ -193,6 +195,10 @@ def run_standalone(lcd=None):
         elif p_type == "AUDIO":
             lcd.log("RX AUDIO", "SAVED TO DISK", duration=3.0)
             tts.speak("Incoming audio note received.")
+        elif p_type == "ALERT":
+            msg = str(payload.get("data", ""))
+            lcd.log("RX ALERT", msg[:16], duration=5.0)
+            tts.speak(f"Emergency alert: {msg}")
         else:
             lcd.log("LORA RX", str(p_type), duration=2.0)
             tts.speak(f"Received message of type {p_type}")

@@ -17,6 +17,7 @@ class GPSReceiver:
         self.lat = self.lon = "0.0000"
         self.sats = "0"
         self.has_fix = False
+        self.utc_time = None
         self.last_read = 0
         
         try:
@@ -40,14 +41,27 @@ class GPSReceiver:
                     if getattr(msg, 'gps_qual', 0) > 0 and msg.latitude and msg.longitude:
                         self.lat, self.lon = f"{msg.latitude:.4f}{msg.lat_dir}", f"{msg.longitude:.4f}{msg.lon_dir}"
                         self.has_fix = True
+                        # Parse NMEA timestamp to UTC float for EpochClock
+                        ts = getattr(msg, 'timestamp', None)
+                        if ts is not None:
+                            try:
+                                import datetime
+                                today = datetime.date.today()
+                                dt = datetime.datetime.combine(today, ts,
+                                                               tzinfo=datetime.timezone.utc)
+                                self.utc_time = dt.timestamp()
+                            except (TypeError, AttributeError, ValueError):
+                                pass
                     else:
                         self.has_fix = False
+                        self.utc_time = None
                     break
         except Exception:
             pass
 
     def get_telemetry(self):
-        return {"LAT": self.lat, "LON": self.lon, "SATS": self.sats, "FIX": self.has_fix}
+        return {"LAT": self.lat, "LON": self.lon, "SATS": self.sats,
+                "FIX": self.has_fix, "UTC": self.utc_time}
 
     def close(self):
         if self.ser and self.ser.is_open: self.ser.close()
