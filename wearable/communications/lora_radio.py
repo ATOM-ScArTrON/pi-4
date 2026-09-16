@@ -7,7 +7,7 @@ import queue
 import threading
 import serial
 from gpiozero import OutputDevice
-from config import (LORA_PORT, LORA_BAUD, LORA_M0_PIN, LORA_M1_PIN, MESH_KEY,
+from config import (LORA_PORT, LORA_BAUD, LORA_M0_PIN, LORA_M1_PIN,
                     MESH_NONCE_FILE, MISSION_KEYSET_PATH, PEER_ID)
 from wearable.communications.lora_protocol import LoRaProtocol, LoRaAssembler
 from wearable.crypto.mesh_crypto import NonceManager
@@ -23,7 +23,11 @@ class LoRaRadio:
         self.ser = self.m0 = self.m1 = self.listener_thread = None
         self.peer_id = peer_id
         self.keyset, self.broadcast_key = self._load_keyset()
-        self.key = self.keyset.get(peer_id) or next(iter(self.keyset.values()), self._load_peer_key(peer_id))
+        self.key = self.keyset.get(peer_id) or next(iter(self.keyset.values()), None)
+        if self.key is None:
+            raise RuntimeError(
+                "No provisioned mission key is available. Run provisioning before starting LoRa."
+            )
         self.protocol = LoRaProtocol(self.key, keyset=self.keyset, peer_id=peer_id,
                                      broadcast_key=self.broadcast_key,
                                      nonce_manager=NonceManager(MESH_NONCE_FILE))
@@ -57,22 +61,10 @@ class LoRaRadio:
                 return keyset, broadcast
         except (OSError, KeyError, TypeError, ValueError):
             pass
-        return {}, None
-
-    @staticmethod
-    def _load_peer_key(peer_id):
-        """Load one provisioned pairwise key, falling back only for development."""
-        try:
-            import json
-            with open(MISSION_KEYSET_PATH, "r", encoding="utf-8") as stream:
-                keyset = json.load(stream).get("mission_keyset", {})
-            if peer_id and peer_id in keyset:
-                return bytes.fromhex(keyset[peer_id])
-            if len(keyset) == 1:
-                return bytes.fromhex(next(iter(keyset.values())))
-        except (OSError, KeyError, TypeError, ValueError):
-            pass
-        return MESH_KEY
+        raise RuntimeError(
+            f"No valid mission keyset found at {MISSION_KEYSET_PATH}. "
+            "Provision this Pi before starting LoRa."
+        )
 
     def start_listener(self, on_packet_received=None):
         if not self.ser or self.listener_thread: return

@@ -23,10 +23,6 @@ e.g. `pip install ascon`) before relying on it for anything that has to
 resist a real adversary.
 """
 
-from wearable.ui.terminal import display_on_terminal
-
-print = display_on_terminal
-
 MASK64 = 0xFFFFFFFFFFFFFFFF
 
 # Round constants for the 12-round permutation (p^a). p^b (6 rounds) just

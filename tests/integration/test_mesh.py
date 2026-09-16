@@ -20,6 +20,18 @@ def run_standalone():
 
     payload = {"T": "TXT", "MSG": "encrypted JSON survives binary LoRa framing " * 20}
     frames = sender.encode_json_payload(payload)
+    diagnostic_plaintext = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
+    diagnostic_nonce = bytes.fromhex("000000010000000000000001")
+    diagnostic_cipher = AsconCipher(key)
+    diagnostic_ciphertext = diagnostic_cipher.encrypt(diagnostic_plaintext, diagnostic_nonce)
+    display_on_terminal("\n[Mesh Diagnostic] plaintext JSON:")
+    display_on_terminal(diagnostic_plaintext)
+    display_on_terminal(f"[Mesh Diagnostic] nonce: {diagnostic_nonce.hex()}")
+    display_on_terminal(f"[Mesh Diagnostic] ciphertext+tag: {diagnostic_ciphertext.hex()}")
+    display_on_terminal(f"[Mesh Diagnostic] ciphertext differs from plaintext: {diagnostic_ciphertext != diagnostic_plaintext.encode('utf-8')}")
+    display_on_terminal(f"[Mesh Diagnostic] binary frame lengths: {[len(frame) for frame in frames]}")
+    display_on_terminal(f"[Mesh Diagnostic] first wire frame: {frames[0].hex()}")
+    assert diagnostic_cipher.decrypt(diagnostic_ciphertext, diagnostic_nonce) == diagnostic_plaintext
     recovered = None
     for frame in frames:
         recovered = assembler.process_frame(frame)

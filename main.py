@@ -44,10 +44,9 @@ MENU = {
     "12": ("LoRa Chat Mode",             "wearable.communications.chat"),
     "13": ("Full Integrated System",     None),
     "14": ("Run Secure Mesh Payload Tests", "tests.integration.test_mesh"),
-    "15": ("Run Client-Server Tests", "tests.integration.test_client_server"),
-    "16": ("Run Ascon-XOF Tests", "tests.unit.crypto.test_ascon"),
-    "17": ("Provision Pi From Central Server", "wearable.communications.provisioning_client"),
-    "18": ("Sync Gateway Queue", "wearable.communications.gateway_sync"),
+    "15": ("Run Ascon-XOF Tests", "tests.unit.crypto.test_ascon"),
+    "16": ("Provision Pi From Central Server", "wearable.communications.provisioning_client"),
+    "17": ("Sync Gateway Queue", "wearable.communications.gateway_sync"),
     "0":  ("Exit",                       None),
 }
 
