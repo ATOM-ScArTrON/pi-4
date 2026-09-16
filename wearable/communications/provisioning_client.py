@@ -11,6 +11,11 @@ print = display_on_terminal
 
 
 def validate_keyset(payload):
+    if not isinstance(payload.get("device_id"), str) or not payload["device_id"].strip():
+        raise ValueError("provisioning response must contain device_id")
+    epoch = payload.get("key_epoch", payload.get("mission_epoch_id"))
+    if not isinstance(epoch, int) or epoch < 0:
+        raise ValueError("provisioning response must contain a non-negative key_epoch")
     keyset = payload.get("mission_keyset")
     if not isinstance(keyset, dict):
         raise ValueError("mission_keyset must be a {peer_id: key} mapping")
@@ -26,11 +31,13 @@ def validate_keyset(payload):
 def provision(server_url, device_id, output_path, ca_file, cert_file, key_file):
     context = ssl.create_default_context(cafile=ca_file)
     context.load_cert_chain(cert_file, key_file)
-    request = Request(server_url.rstrip("/") + "/register",
+    request = Request(server_url.rstrip("/") + "/device/register",
                       data=json.dumps({"device_id": device_id}).encode("utf-8"),
                       headers={"Content-Type": "application/json"}, method="POST")
     with urlopen(request, context=context, timeout=15) as response:
         payload = validate_keyset(json.loads(response.read().decode("utf-8")))
+        if payload["device_id"] != device_id:
+            raise ValueError("provisioning response device_id does not match this device")
     directory = os.path.dirname(output_path)
     if directory:
         os.makedirs(directory, exist_ok=True)

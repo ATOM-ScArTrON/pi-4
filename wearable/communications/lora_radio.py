@@ -22,7 +22,7 @@ class LoRaRadio:
     def __init__(self, port=LORA_PORT, baudrate=LORA_BAUD, peer_id=PEER_ID):
         self.ser = self.m0 = self.m1 = self.listener_thread = None
         self.peer_id = peer_id
-        self.keyset, self.broadcast_key = self._load_keyset()
+        self.keyset, self.broadcast_key, self.key_epoch = self._load_keyset()
         self.key = self.keyset.get(peer_id) or next(iter(self.keyset.values()), None)
         if self.key is None:
             raise RuntimeError(
@@ -58,7 +58,10 @@ class LoRaRadio:
             keyset = {name: bytes.fromhex(value) for name, value in payload.get("mission_keyset", {}).items()}
             broadcast = bytes.fromhex(payload.get("mission_broadcast_key", ""))
             if keyset and len(broadcast) == 16:
-                return keyset, broadcast
+                epoch = payload.get("key_epoch", payload.get("mission_epoch_id", 0))
+                if not isinstance(epoch, int) or epoch < 0:
+                    raise ValueError("invalid key epoch")
+                return keyset, broadcast, epoch
         except (OSError, KeyError, TypeError, ValueError):
             pass
         raise RuntimeError(

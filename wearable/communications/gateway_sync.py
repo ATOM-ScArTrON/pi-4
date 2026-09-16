@@ -3,6 +3,8 @@
 import json
 import os
 import ssl
+import hashlib
+import uuid
 from urllib.request import Request, urlopen
 from wearable.ui.terminal import display_on_terminal
 
@@ -20,6 +22,8 @@ class GatewaySyncQueue:
         os.makedirs(os.path.dirname(queue_path) or ".", exist_ok=True)
 
     def enqueue(self, payload):
+        payload = dict(payload)
+        payload.setdefault("message_id", uuid.uuid4().hex)
         with open(self.queue_path, "a", encoding="utf-8") as stream:
             stream.write(json.dumps(payload, separators=(",", ":")) + "\n")
         self._rotate()
@@ -47,13 +51,29 @@ class GatewaySyncQueue:
             return 0
         context = ssl.create_default_context(cafile=ca_file)
         context.load_cert_chain(cert_file, key_file)
-        request = Request(server_url.rstrip("/") + "/sync",
-                          data=json.dumps({"device_id": device_id, "records": records}).encode("utf-8"),
+        normalized = []
+        for index, record in enumerate(records):
+            record = dict(record)
+            if not record.get("message_id"):
+                digest = hashlib.sha256(json.dumps(record, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()[:24]
+                record["message_id"] = f"legacy-{digest}-{index}"
+            normalized.append(record)
+        request = Request(server_url.rstrip("/") + "/device/sync",
+                          data=json.dumps({"device_id": device_id, "records": normalized}).encode("utf-8"),
                           headers={"Content-Type": "application/json"}, method="POST")
         with urlopen(request, context=context, timeout=15) as response:
-            response.read()
-        os.remove(self.queue_path)
-        return len(records)
+            result = json.loads(response.read().decode("utf-8"))
+        removable = set(result.get("accepted", [])) | set(result.get("duplicates", []))
+        remaining = [record for record in normalized if record.get("message_id") not in removable]
+        if remaining:
+            temporary = self.queue_path + ".tmp"
+            with open(temporary, "w", encoding="utf-8") as stream:
+                for record in remaining:
+                    stream.write(json.dumps(record, separators=(",", ":")) + "\n")
+            os.replace(temporary, self.queue_path)
+        else:
+            os.remove(self.queue_path)
+        return len(removable)
 
 
 def run_standalone():
