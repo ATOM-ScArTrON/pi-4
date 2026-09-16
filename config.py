@@ -66,6 +66,19 @@ if len(MESH_KEY) != 16:
 MESH_NONCE_FILE = os.environ.get(
     "MESH_NONCE_FILE", os.path.join(USER_HOME, ".wearable_mesh_nonce")
 )
+MISSION_KEYSET_PATH = os.environ.get(
+    "MISSION_KEYSET_PATH", os.path.join(USER_HOME, ".wearable_mission_keyset.json")
+)
+DEVICE_ID = os.environ.get("DEVICE_ID", "wearable-node")
+PEER_ID = os.environ.get("PEER_ID", "")
+PROVISION_SERVER_URL = os.environ.get("PROVISION_SERVER_URL", "")
+TLS_CA_FILE = os.environ.get("TLS_CA_FILE", "")
+TLS_CERT_FILE = os.environ.get("TLS_CERT_FILE", "")
+TLS_KEY_FILE = os.environ.get("TLS_KEY_FILE", "")
+GATEWAY_QUEUE_PATH = os.environ.get(
+    "GATEWAY_QUEUE_PATH", os.path.join(USER_HOME, "gateway_queue.jsonl")
+)
+GATEWAY_ENABLED = os.environ.get("GATEWAY_ENABLED", "0") == "1"
 
 # NEO-6M GPS receiver UART (typically UART3 on Pi 4 /dev/ttyAMA3)
 GPS_PORT = os.environ.get("GPS_PORT", "/dev/ttyAMA3")
