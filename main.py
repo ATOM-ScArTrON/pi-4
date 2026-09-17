@@ -18,6 +18,7 @@ from gpiozero import Button
 from wearable.peripherals.bluetooth import BluetoothManager
 from wearable.ui.status import print_audio_status
 from wearable.ui.terminal import display_on_terminal
+from wearable.system.actions import parse_action
 
 print = display_on_terminal
 
@@ -68,23 +69,6 @@ def run_module(module_path):
         print(f"[Error]: {module_path} has no run_standalone() function.")
         return
     mod.run_standalone()
-
-
-def parse_action(text):
-    """Standardize keyword matching for both voice and typed inputs."""
-    body = text.strip().lower()
-    tokens = set(body.split())
-    if body == "status":
-        return "STATUS"
-    if body in ("mute tts", "tts off", "voice off"):
-        return "MUTE_TTS"
-    if {"click", "capture", "photo", "picture", "snap"}.intersection(tokens):
-        return "CAPTURE"
-    if {"send", "transmit"}.intersection(tokens):
-        return "SEND"
-    if {"receive", "listen"}.intersection(tokens):
-        return "RECEIVE"
-    return "TEXT"
 
 
 def main():

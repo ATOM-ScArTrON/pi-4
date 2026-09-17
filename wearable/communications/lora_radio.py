@@ -20,7 +20,7 @@ from config import (GATEWAY_ENABLED, GATEWAY_QUEUE_PATH, DEVICE_ID,
 print = display_on_terminal
 
 class LoRaRadio:
-    def __init__(self, port=LORA_PORT, baudrate=LORA_BAUD, peer_id=PEER_ID):
+    def __init__(self, port=LORA_PORT, baudrate=LORA_BAUD, peer_id=PEER_ID, gps_receiver=None):
         self.ser = self.m0 = self.m1 = self.listener_thread = None
         self.peer_id = peer_id
         self.keyset, self.broadcast_key, self.key_epoch, epoch_start_time = self._load_keyset()
@@ -32,7 +32,7 @@ class LoRaRadio:
         self.protocol = LoRaProtocol(self.key, keyset=self.keyset, peer_id=peer_id,
                                      broadcast_key=self.broadcast_key,
                                      nonce_manager=NonceManager(MESH_NONCE_FILE),
-                                     epoch_clock=EpochClock(epoch_start_time))
+                                     epoch_clock=EpochClock(epoch_start_time, gps=gps_receiver))
         self.assembler = LoRaAssembler(self.protocol)
         self.gateway_queue = None
         if GATEWAY_ENABLED:
@@ -41,6 +41,7 @@ class LoRaRadio:
         self._rx_buffer = bytearray()
         self.rx_queue = queue.Queue()
         self.stop_event = threading.Event()
+        self.gps_receiver = gps_receiver
         
         try:
             self.m0 = OutputDevice(LORA_M0_PIN, active_high=True, initial_value=False)

@@ -1,3 +1,20 @@
+"""Full hardware coordinator for the wearable edge node."""
+
+import os
+import sys
+import time
+import queue
+import threading
+from gpiozero import Button
+from wearable.peripherals.bluetooth import BluetoothManager
+from wearable.ui.status import print_audio_status
+from wearable.ui.terminal import display_on_terminal
+from wearable.system.actions import parse_action
+from config import BUTTON_PHOTO, BUTTON_LORA_TX, BUTTON_LORA_RX, LORA_COOLDOWN, CAMERA_COOLDOWN
+
+print = display_on_terminal
+
+
 def run_full_system():
     """The original all-sensors-at-once coordinator loop."""
     from wearable.ui.display import Display
@@ -22,7 +39,7 @@ def run_full_system():
     vitals = VitalsSensor()
     gps = GPSReceiver()
     camera = CameraManager()
-    lora = LoRaRadio()
+    lora = LoRaRadio(gps_receiver=gps)
     stt = SpeechToText()
     tts = TextToSpeech()
     bt = BluetoothManager(lcd=lcd)
@@ -293,35 +310,3 @@ def run_full_system():
         time.sleep(1.0)
         lcd.close()
         print("Hardware shutdown cleanly complete.")
-
-
-"""Full hardware coordinator for the wearable edge node."""
-
-import os
-import sys
-import time
-import queue
-import threading
-from gpiozero import Button
-from wearable.peripherals.bluetooth import BluetoothManager
-from wearable.ui.status import print_audio_status
-from wearable.ui.terminal import display_on_terminal
-from config import BUTTON_PHOTO, BUTTON_LORA_TX, BUTTON_LORA_RX, LORA_COOLDOWN, CAMERA_COOLDOWN
-
-print = display_on_terminal
-
-
-def parse_action(text):
-    body = text.strip().lower()
-    tokens = set(body.split())
-    if body == "status":
-        return "STATUS"
-    if body in ("mute tts", "tts off", "voice off"):
-        return "MUTE_TTS"
-    if {"click", "capture", "photo", "picture", "snap"}.intersection(tokens):
-        return "CAPTURE"
-    if {"send", "transmit"}.intersection(tokens):
-        return "SEND"
-    if {"receive", "listen"}.intersection(tokens):
-        return "RECEIVE"
-    return "TEXT"

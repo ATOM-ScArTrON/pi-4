@@ -4,7 +4,7 @@ from wearable.crypto.ascon import ascon_xof
 from wearable.ui.terminal import display_on_terminal
 
 
-def run_standalone():
+def test_ascon_xof_properties():
     first = ascon_xof(b"hello world", 32)
     assert first == ascon_xof(b"hello world", 32)
     assert first != ascon_xof(b"hello world!", 32)
@@ -13,4 +13,9 @@ def run_standalone():
 
 
 if __name__ == "__main__":
-    run_standalone()
+    test_ascon_xof_properties()
+
+
+def run_standalone():
+    """Compatibility wrapper for the Raspberry Pi launcher menu."""
+    test_ascon_xof_properties()

@@ -54,6 +54,7 @@ import os
 import struct
 import threading
 import time
+from wearable.system.epoch_clock import EPOCH_DURATION
 try:
     from .ascon import ascon_xof
 except ImportError:  # supports `python modules/mesh_crypto.py` on the Pi
@@ -192,7 +193,6 @@ def unwrap(key: bytes, nonce: bytes, ciphertext: bytes) -> str:
 
 
 BOOT_FORWARD_SKIP = 1000
-EPOCH_DURATION = 3600  # seconds
 
 
 class NonceManager:

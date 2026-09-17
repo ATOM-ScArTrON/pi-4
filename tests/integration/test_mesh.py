@@ -11,7 +11,7 @@ from wearable.ui.terminal import display_on_terminal
 print = display_on_terminal
 
 
-def run_standalone():
+def test_mesh_round_trip():
     key = bytes.fromhex("00112233445566778899aabbccddeeff")
     nonce_file = os.path.join(tempfile.gettempdir(), "mesh-test-sender-nonce")
     sender = LoRaProtocol(key, nonce_manager=NonceManager(nonce_file))
@@ -75,4 +75,9 @@ def run_standalone():
 
 
 if __name__ == "__main__":
-    run_standalone()
+    test_mesh_round_trip()
+
+
+def run_standalone():
+    """Compatibility wrapper for the Raspberry Pi launcher menu."""
+    test_mesh_round_trip()

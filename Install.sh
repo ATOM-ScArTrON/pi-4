@@ -111,6 +111,7 @@ EOF
 
 echo "=== 7. Cleaning Up Redundant Artifacts ==="
 rm -f dht_s_bt.py earbuds.py gps.py loratxrx.py nbm.py test.wav
+rm -rf modules
 find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
 
 echo "--------------------------------------------------"

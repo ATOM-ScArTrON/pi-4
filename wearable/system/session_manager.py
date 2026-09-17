@@ -33,7 +33,7 @@ CONTINUOUS_POLL_INTERVAL = 0.05
 
 
 class SessionManager:
-    def __init__(self, primary: str, lcd=None):
+    def __init__(self, primary: str, lcd=None, gps=None):
         if primary not in REGISTRY:
             raise ValueError(f"Unknown primary module: {primary}")
 
@@ -53,6 +53,7 @@ class SessionManager:
         self._threads = {}
         self._stop_events = {}
         self._lock = threading.Lock()
+        self.gps = gps
 
         self.activate(primary, quiet=True)
 
@@ -66,6 +67,8 @@ class SessionManager:
         cls = getattr(mod, entry["class"])
         if name == "bluetooth":
             return cls(lcd=self.lcd)
+        if name == "lora":
+            return cls(gps_receiver=self.gps)
         return cls()
 
     def activate(self, name, quiet=False):

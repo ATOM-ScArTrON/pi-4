@@ -5,7 +5,9 @@ Minimal, dependency-free, pure-Python implementation of the Ascon
 permutation and the Ascon-XOF extendable-output function (Ascon v1.2 /
 NIST SP 800-232 family).
 
-Only the pieces this project actually uses are implemented:
+Only the pieces this project actually uses are implemented. The server tier
+keeps a sibling copy at ``central-server/server/crypto/ascon.py``; changes to
+this primitive must be applied and tested in both repositories.
   - ascon_permutation(state, rounds)   the core 320-bit permutation
   - ascon_xof(message, hashlength)     sponge-based XOF, arbitrary output length
 
