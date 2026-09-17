@@ -63,6 +63,8 @@ class SessionManager:
 
     def _instantiate(self, name):
         entry = REGISTRY[name]
+        if name == "gps" and self.gps is not None:
+            return self.gps
         mod = importlib.import_module(entry["path"])
         cls = getattr(mod, entry["class"])
         if name == "bluetooth":

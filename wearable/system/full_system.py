@@ -1,30 +1,37 @@
 """Full hardware coordinator for the wearable edge node."""
 
-import os
 import sys
 import time
 import queue
 import threading
 from gpiozero import Button
-from wearable.peripherals.bluetooth import BluetoothManager
 from wearable.ui.status import print_audio_status
 from wearable.ui.terminal import display_on_terminal
 from wearable.system.actions import parse_action
-from config import BUTTON_PHOTO, BUTTON_LORA_TX, BUTTON_LORA_RX, LORA_COOLDOWN, CAMERA_COOLDOWN
+from wearable.system.session_manager import SessionManager
+from wearable.communications.lora_radio import make_packet_handler, send_selected_payloads
+from config import BUTTON_PHOTO, BUTTON_LORA_TX, BUTTON_LORA_RX, LORA_COOLDOWN
 
 print = display_on_terminal
 
+# Every continuous-kind sensor this coordinator keeps running in the
+# background at all times, via SessionManager -- same activation path
+# (and same module_registry payload extractors) that the individual
+# launchers use, instead of a separate hand-rolled instantiation here.
+BACKGROUND_SENSORS = ("dht", "sound", "motion", "vitals", "gps")
+
 
 def run_full_system():
-    """The original all-sensors-at-once coordinator loop."""
+    """The all-sensors-at-once coordinator loop, now built on SessionManager.
+
+    Every sensor is activated as a SessionManager background module (so it's
+    polled the same way, and its payload is extracted the same way, as when
+    launched individually), and outgoing sends transmit one packet per active
+    source via send_selected_payloads() instead of bundling everything into
+    a single hand-built TEL packet.
+    """
     from wearable.ui.display import Display
-    from wearable.sensors.dht import DHTSensor
-    from wearable.sensors.sound import SoundSensor
-    from wearable.sensors.motion import MotionSensor
-    from wearable.sensors.vitals import VitalsSensor
     from wearable.sensors.gps import GPSReceiver
-    from wearable.peripherals.camera import CameraManager
-    from wearable.communications.lora_radio import LoRaRadio
     from wearable.ui.stt import SpeechToText
     from wearable.ui.tts import TextToSpeech
 
@@ -33,22 +40,36 @@ def run_full_system():
     print("==================================================")
 
     lcd = Display()
-    dht = DHTSensor()
-    sound = SoundSensor()
-    motion = MotionSensor()
-    vitals = VitalsSensor()
+
+    # Constructed directly, rather than through SessionManager.activate(),
+    # so this exact instance can be threaded into EpochClock via
+    # SessionManager(gps=...) *and* polled as the "gps" background module --
+    # SessionManager reuses it instead of opening a second serial connection
+    # to the same port.
     gps = GPSReceiver()
-    camera = CameraManager()
-    lora = LoRaRadio(gps_receiver=gps)
+
+    sm = SessionManager(primary="lora", lcd=lcd, gps=gps)
+    lora = sm.get("lora")
+
+    for name in BACKGROUND_SENSORS:
+        sm.activate(name, quiet=True)
+    sm.activate("camera", quiet=True)
+    sm.activate("bluetooth", quiet=True)
+
+    dht = sm.get("dht")
+    sound = sm.get("sound")
+    motion = sm.get("motion")
+    vitals = sm.get("vitals")
+    camera = sm.get("camera")
+    bt = sm.get("bluetooth")
+
     stt = SpeechToText()
     tts = TextToSpeech()
-    bt = BluetoothManager(lcd=lcd)
 
     btn_photo = Button(BUTTON_PHOTO, pull_up=True, bounce_time=0.3)
     btn_tx = Button(BUTTON_LORA_TX, pull_up=True, bounce_time=0.3)
     btn_rx = Button(BUTTON_LORA_RX, pull_up=True, bounce_time=0.3)
 
-    # Queue for non-blocking keyboard inputs
     input_queue = queue.Queue()
 
     def keyboard_listener():
@@ -63,50 +84,21 @@ def run_full_system():
             except Exception:
                 break
 
-    kb_thread = threading.Thread(target=keyboard_listener, daemon=True)
-    kb_thread.start()
+    threading.Thread(target=keyboard_listener, daemon=True).start()
 
-    def handle_incoming_lora(payload):
-        p_type = payload.get("type")
-        print(f"\n[LoRa RX Packet Received]: Type={p_type}")
-
-        if p_type in ("TEL", "VIT"):
-            bpm = payload.get("BPM", 0)
-            spo2 = payload.get("SPO2", 0)
-            ts = payload.get("timestamp", "")
-            lcd.show_banner(f"RX VIT [{ts}]", f"B:{bpm} S:{spo2}%", duration=4.0)
-            tts.speak(f"Received vitals: heart rate {bpm}, oxygen {spo2} percent")
-
-        elif p_type == "TEXT":
-            msg = payload.get("text", "")
-            lcd.show_banner("MSG RECEIVED", msg[:16], duration=5.0)
-            tts.speak(f"Incoming message: {msg}")
-
-        elif p_type == "IMAGE":
-            lcd.show_banner("IMAGE RECEIVED", "SAVED TO DISK", duration=4.0)
-            tts.speak("Incoming image received and saved to disk.")
-
-        elif p_type == "AUDIO":
-            lcd.show_banner("AUDIO RECEIVED", "SAVED TO DISK", duration=4.0)
-            tts.speak("Incoming audio note received.")
-
-    lora.start_listener(on_packet_received=handle_incoming_lora)
+    _on_packet = make_packet_handler(lcd, tts)
+    lora.start_listener(on_packet_received=_on_packet)
     stt.start()
 
     tts.speak("Edge monitoring station online.")
     lcd.show_banner("SYSTEM READY", "ALL SENSORS ON", duration=2.0)
 
     last_lora_tx_time = 0
-    last_camera_time = 0
     last_gateway_sync = 0
 
     def trigger_photo(source="MANUAL"):
-        nonlocal last_camera_time
-        now = time.time()
-        if now - last_camera_time < CAMERA_COOLDOWN:
-            return
-        last_camera_time = now
-
+        # CameraManager.capture_photo() already enforces its own cooldown --
+        # no need to duplicate that bookkeeping here.
         lcd.show_banner("TAKING PHOTO", "PLEASE WAIT...", duration=2.0)
         path = camera.capture_photo(source=source)
         if path:
@@ -115,64 +107,48 @@ def run_full_system():
         else:
             lcd.show_banner("CAMERA ERROR", "RETRY", duration=2.0)
 
-    def trigger_lora_tx(source="MANUAL"):
+    def trigger_lora_send(source="MANUAL"):
         nonlocal last_lora_tx_time
         now = time.time()
         if now - last_lora_tx_time < LORA_COOLDOWN:
             return
         last_lora_tx_time = now
 
-        payload = {
-            "BPM": vitals.bpm if vitals.bpm else 0,
-            "SPO2": vitals.spo2 if vitals.spo2 else 0,
-            "TEMP": dht.temp if dht.temp else 0,
-            "HUM": dht.humidity if dht.humidity else 0,
-            "SOUND": sound.status,
-            "FB": motion.dir_fb,
-            "LR": motion.dir_lr,
-            "LAT": gps.lat,
-            "LON": gps.lon,
-            "SATS": gps.sats
-        }
-        print(f"\n[LoRa TX Packet Attempt]: Type=TEL | Source={source} | Data={payload}")
-        lcd.show_banner("LORA TX", f"B:{int(payload['BPM'])} S:{int(payload['SPO2'])}%", duration=2.5)
-        success = lora.send_telemetry(payload)
+        sources = sm.payload_sources()
+        if not sources:
+            print("[LoRa Send] No active data sources ready to send.")
+            lcd.show_banner("LORA TX", "NOTHING READY", duration=2.0)
+            return
 
-        if success:
-            print("[LoRa TX Packet Sent]: Type=TEL")
-            tts.speak("Telemetry transmitted.")
-        else:
-            print("[LoRa TX Failed]: Message send error.")
-            lcd.show_banner("LORA TX", "FAILED", duration=2.5)
-            tts.speak("Telemetry message failed to send.")
+        print(f"\n[LoRa TX Attempt]: Source={source} | Sending={sources}")
+        lcd.show_banner("LORA TX", f"{len(sources)} READING(S)", duration=2.0)
+        send_selected_payloads(sm, lora, sources, lcd=lcd, tts=tts)
 
-    # --- Startup Health Check: surface hardware/init failures on LCD ---
     def check_startup_health():
         checks = [
-            (not dht.dht_device,      "DHT11 FAILED",    "CHECK WIRING"),
-            (not motion.is_connected, "MPU6050 FAILED",  "CHECK WIRING"),
-            (not vitals.is_connected, "MAX30102 FAILED", "CHECK WIRING"),
-            (not gps.ser,             "GPS FAILED",      "CHECK PORT"),
-            (not camera.picam2,       "CAMERA FAILED",   "CHECK RIBBON"),
-            (not lora.ser,            "LORA FAILED",     "CHECK PORT"),
-            (stt.model is None,       "STT FAILED",      "NO MODEL"),
-            (tts.engine == tts.DUMMY_ENGINE, "TTS FAILED", "NO ENGINE"),
+            (dht is None or not dht.dht_device,         "DHT11 FAILED",    "CHECK WIRING"),
+            (motion is None or not motion.is_connected, "MPU6050 FAILED",  "CHECK WIRING"),
+            (vitals is None or not vitals.is_connected, "MAX30102 FAILED", "CHECK WIRING"),
+            (not gps.ser,                                "GPS FAILED",      "CHECK PORT"),
+            (camera is None or not camera.picam2,        "CAMERA FAILED",   "CHECK RIBBON"),
+            (not lora.ser,                                "LORA FAILED",     "CHECK PORT"),
+            (stt.model is None,                           "STT FAILED",      "NO MODEL"),
+            (tts.engine == tts.DUMMY_ENGINE,              "TTS FAILED",      "NO ENGINE"),
         ]
         failures = [(l1, l2) for cond, l1, l2 in checks if cond]
 
         if not failures:
-            display_on_terminal("[Startup Health] All subsystem checks passed.")
+            print("[Startup Health] All subsystem checks passed.")
             lcd.log("ALL SYSTEMS OK", "", duration=2.0)
             return
 
-        display_on_terminal("[Startup Health] Failures detected:")
+        print("[Startup Health] Failures detected:")
         for l1, l2 in failures:
-            display_on_terminal(f"  - {l1}: {l2}")
+            print(f"  - {l1}: {l2}")
             lcd.log(l1, l2, duration=2.0)
             time.sleep(2.2)
 
     check_startup_health()
-    # --- End health check ---
 
     bt.autoconnect_async(on_result=lambda ok, name: tts.speak(
         f"Connected to {name}." if ok else "No headset found, using onboard audio."
@@ -183,13 +159,60 @@ def run_full_system():
     print("Triggers (Speak or Type): 'click'/'capture'/'photo' | 'send' | 'receive'")
     print("Hardware Pins          : Photo (Pin 21) | TX (Pin 20) | RX (Pin 16)\n")
 
+    def _sensor_status():
+        return {
+            "DHT11":    dht is not None and dht.dht_device is not None,
+            "MPU6050":  motion is not None and motion.is_connected,
+            "MAX30102": vitals is not None and vitals.is_connected,
+            "GPS":      gps.ser is not None,
+            "Camera":   camera is not None and camera.picam2 is not None,
+            "LoRa":     lora.ser is not None,
+        }
+
+    def _handle_command(text, source):
+        """Session-level commands (exit/status/menu/switch/activate-by-name)
+        route through SessionManager first, same as the LoRa Radio and Chat
+        launchers -- then anything left over falls back to this coordinator's
+        own capture/send/receive/mute triggers."""
+        result = sm.route_command(text, source=source)
+        if result == "EXIT":
+            return "EXIT"
+        if result == "STATUS":
+            print_audio_status(tts, stt, lcd)
+            bt_state = bt.name if bt.is_connected() else "none"
+            failed = [name for name, ok in _sensor_status().items() if not ok]
+            print(f"[Status] BT = {bt_state} | Sensors down: {', '.join(failed) if failed else 'none'}")
+            lcd.log("BT:" + bt_state[:12].upper(), "DOWN:" + (",".join(failed)[:11] if failed else "NONE"), duration=2.0)
+            return None
+        if result is not None:
+            return None  # other session command (activate/switch/menu) handled
+
+        action = parse_action(text)
+        print(f"\n[{source} TRIGGER]: '{text}' -> Action: {action}")
+
+        if action == "MUTE_TTS":
+            tts.mute()
+            lcd.show_banner("TTS", "MUTED", duration=1.5)
+        elif action == "CAPTURE":
+            trigger_photo(source=f"{source} '{text}'")
+        elif action == "SEND":
+            trigger_lora_send(source=f"{source} '{text}'")
+        elif action == "RECEIVE":
+            lcd.show_banner("LORA RX", "LISTENING...", duration=3.0)
+            tts.speak("Listening for incoming messages.")
+        elif action == "STATUS":
+            print_audio_status(tts, stt, lcd)
+        else:
+            lcd.show_banner(f"{source} TXT", text[:16], duration=3.0)
+            from wearable.communications.chat import send_chat_message
+            send_chat_message(lora, text, f"FULL SYSTEM {source}")
+        return None
+
     try:
         while True:
-            dht.update()
-            gps.update()
-            motion.update()
-            vitals.update()
-            bt.is_connected()  # polls BT status + re-routes audio if device changed
+            # dht/sound/motion/vitals/gps are polled by SessionManager's own
+            # background threads now -- no manual .update() calls needed here.
+            bt.is_connected()  # BT has no SessionManager thread; poll it directly
 
             if time.time() - last_gateway_sync >= 30.0:
                 last_gateway_sync = time.time()
@@ -200,92 +223,21 @@ def run_full_system():
                 except Exception as exc:
                     print(f"[Gateway] Sync unavailable: {exc}")
 
-            # --- Process Voice & Typed Inputs ---
             raw_voice_cmd = stt.get_command()
-            raw_typed_cmd = None
             try:
                 raw_typed_cmd = input_queue.get_nowait()
             except queue.Empty:
                 raw_typed_cmd = None
 
-            # Handle Voice Command
-            if raw_voice_cmd:
-                action = parse_action(raw_voice_cmd)
-                print(f"\n[VOICE TRIGGER]: '{raw_voice_cmd}' -> Action: {action}")
+            if raw_voice_cmd and _handle_command(raw_voice_cmd, "VOICE") == "EXIT":
+                break
+            if raw_typed_cmd and _handle_command(raw_typed_cmd, "TYPED") == "EXIT":
+                break
 
-                if action == "MUTE_TTS":
-                    tts.mute()
-                    lcd.show_banner("TTS", "MUTED", duration = 1.5)
-                elif action == "UNMUTE TTS":
-                    tts.unmute()
-                    lcd.show_banner("TTS", "UNMUTED", duration = 1.5)
-                elif action == "MUTE STT":
-                        stt.mute()
-                        lcd.show_banner("STT", "MUTED", duration = 1.5)
-                elif action == "UNMUTE STT":
-                        stt.unmute()
-                        lcd.show_banner("STT", "UNMUTED", duration = 1.5)
-                elif action == "CAPTURE":
-                    trigger_photo(source=f"VOICE '{raw_voice_cmd}'")
-                elif action == "SEND":
-                    trigger_lora_tx(source=f"VOICE '{raw_voice_cmd}'")
-                elif action == "RECEIVE":
-                    lcd.show_banner("LORA RX", "LISTENING...", duration=3.0)
-                    tts.speak("Listening for incoming messages.")
-                elif action == "STATUS":
-                    print_audio_status(tts, stt, lcd)
-                    bt_state = bt.name if bt.is_connected() else "none"
-
-                    sensor_states = {
-                        "DHT11":    dht.dht_device is not None,
-                        "MPU6050":  motion.is_connected,
-                        "MAX30102": vitals.is_connected,
-                        "GPS":      gps.ser is not None,
-                        "Camera":   camera.picam2 is not None,
-                        "LoRa":     lora.ser is not None,
-                    }
-                    failed = [name for name, ok in sensor_states.items() if not ok]
-                    print(f"[Status] BT = {bt_state} | [Status] Sensors down: {', '.join(failed) if failed else 'none'}")
-                    lcd.log("BT:" + bt_state[:12].upper(), "DOWN:" + (",".join(failed)[:11] if failed else "NONE"), duration=2.0)
-                else:
-                    lcd.show_banner("VOICE TXT", raw_voice_cmd[:16], duration=3.0)
-                    from wearable.communications.chat import send_chat_message
-                    send_chat_message(lora, raw_voice_cmd, "FULL SYSTEM VOICE")
-
-            # Handle Typed Command
-            if raw_typed_cmd:
-                action = parse_action(raw_typed_cmd)
-                print(f"\n[TYPED TRIGGER]: '{raw_typed_cmd}' -> Action: {action}")
-
-                if action == "MUTE_TTS":
-                    tts.mute()
-                    lcd.show_banner("TTS", "MUTED", duration = 1.5)
-                elif action == "UNMUTE TTS":
-                    tts.unmute()
-                    lcd.show_banner("TTS", "UNMUTED", duration = 1.5)
-                elif action == "MUTE STT":
-                        stt.mute()
-                        lcd.show_banner("STT", "MUTED", duration = 1.5)
-                elif action == "UNMUTE STT":
-                        stt.unmute()
-                        lcd.show_banner("STT", "UNMUTED", duration = 1.5)
-                elif action == "CAPTURE":
-                    trigger_photo(source=f"TYPED '{raw_typed_cmd}'")
-                elif action == "SEND":
-                    trigger_lora_tx(source=f"TYPED '{raw_typed_cmd}'")
-                elif action == "RECEIVE":
-                    lcd.show_banner("LORA RX", "LISTENING...", duration=3.0)
-                    tts.speak("Listening for incoming messages.")
-                else:
-                    lcd.show_banner("TYPED TXT", raw_typed_cmd[:16], duration=3.0)
-                    from wearable.communications.chat import send_chat_message
-                    send_chat_message(lora, raw_typed_cmd, "FULL SYSTEM TYPED")
-
-            # --- Physical Button Triggers ---
             if btn_photo.is_pressed:
                 trigger_photo(source="BUTTON Pin 21")
             elif btn_tx.is_pressed:
-                trigger_lora_tx(source="BUTTON Pin 20")
+                trigger_lora_send(source="BUTTON Pin 20")
             elif btn_rx.is_pressed:
                 lcd.show_banner("LORA RX", "LISTENING...", duration=3.0)
 
@@ -298,11 +250,7 @@ def run_full_system():
     finally:
         print("Cleaning up resources...")
         stt.stop()
-        camera.close()
-        lora.close()
-        dht.close()
-        sound.close()
-        gps.close()
+        sm.shutdown()  # closes dht/sound/motion/vitals/gps/camera/bluetooth/lora
         btn_photo.close()
         btn_tx.close()
         btn_rx.close()

@@ -7,15 +7,13 @@ import queue
 import threading
 import serial
 from gpiozero import OutputDevice
-from config import (LORA_PORT, LORA_BAUD, LORA_M0_PIN, LORA_M1_PIN,
-                    MESH_NONCE_FILE, MISSION_KEYSET_PATH, PEER_ID)
+from config import (LORA_PORT, LORA_BAUD, LORA_M0_PIN, LORA_M1_PIN, MESH_NONCE_FILE, MISSION_KEYSET_PATH, PEER_ID)
 from wearable.communications.lora_protocol import LoRaProtocol, LoRaAssembler
 from wearable.crypto.mesh_crypto import NonceManager
 from wearable.system.epoch_clock import EpochClock
 from wearable.ui.status import print_audio_status
 from wearable.ui.terminal import display_on_terminal
-from config import (GATEWAY_ENABLED, GATEWAY_QUEUE_PATH, DEVICE_ID,
-                    PROVISION_SERVER_URL, TLS_CA_FILE, TLS_CERT_FILE, TLS_KEY_FILE)
+from config import (GATEWAY_ENABLED, GATEWAY_QUEUE_PATH, DEVICE_ID, PROVISION_SERVER_URL, TLS_CA_FILE, TLS_CERT_FILE, TLS_KEY_FILE)
 
 print = display_on_terminal
 
@@ -149,6 +147,79 @@ class LoRaRadio:
         if self.m0: self.m0.close()
         if self.m1: self.m1.close()
 
+def make_packet_handler(lcd, tts):
+    """Shared incoming-LoRa-packet display/speech handler, used by every
+    run_standalone() launcher that listens on the radio (LoRa Radio, Full
+    System) so every packet type gets the same treatment everywhere instead
+    of each launcher hand-rolling its own partial copy."""
+    def _on_packet(payload):
+        p_type = payload.get("type")
+        print(f"\n[LoRa RX Packet Received]: Type={p_type} | Data={payload}")
+        if p_type == "VIT":
+            bpm = payload.get("BPM", 0)
+            spo2 = payload.get("SPO2", 0)
+            lcd.log(f"RX B:{bpm}", f"S:{spo2}%", duration=3.0)
+            tts.speak(f"Received vitals: heart rate {bpm}, oxygen {spo2} percent")
+        elif p_type in ("DHT", "SND", "MOT", "GPS"):
+            summary = ", ".join(f"{k}:{v}" for k, v in payload.items() if k not in ("type", "timestamp"))
+            lcd.log(f"RX {p_type}", summary[:16], duration=3.0)
+            tts.speak(f"Received {p_type} reading: {summary}")
+        elif p_type == "TEXT":
+            msg = str(payload.get("text", ""))
+            lcd.log("RX MSG", msg[:16], duration=3.0)
+            tts.speak(f"Incoming message: {msg}")
+        elif p_type == "IMAGE":
+            lcd.log("RX IMAGE", "SAVED TO DISK", duration=3.0)
+            tts.speak("Incoming image received and saved to disk.")
+        elif p_type == "AUDIO":
+            lcd.log("RX AUDIO", "SAVED TO DISK", duration=3.0)
+            tts.speak("Incoming audio note received.")
+        elif p_type == "ALERT":
+            msg = str(payload.get("data", ""))
+            lcd.log("RX ALERT", msg[:16], duration=5.0)
+            tts.speak(f"Emergency alert: {msg}")
+        else:
+            lcd.log("LORA RX", str(p_type), duration=2.0)
+            tts.speak(f"Received message of type {p_type}")
+    return _on_packet
+
+
+def send_selected_payloads(sm, radio, selected, lcd=None, tts=None):
+    """Send one packet per chosen active data source -- keeps each message
+    small and unambiguous rather than bundling everything into one packet
+    (LoRa airtime is precious; chunked encoders already exist for the large
+    IMG/AUD case). Shared by every launcher that offers a multi-source send
+    (LoRa Radio's own send menu, the Full System coordinator)."""
+    for name in selected:
+        ptype, data = sm.build_payload(name)
+        if ptype is None:
+            print(f"[LoRa Send] '{name}' has no data ready yet -- skipped.")
+            if lcd:
+                lcd.log(f"{name.upper()} SKIPPED", "NO DATA", duration=2.0)
+            continue
+
+        if isinstance(data, (bytes, bytearray)):
+            packets = radio.protocol.encode_binary(data, ptype)
+        else:
+            packets = radio.protocol.encode_reading(ptype, data)
+
+        print(f"\n[LoRa TX Attempt]: Type={ptype} | Source={name} | "
+              f"Data={data if not isinstance(data, (bytes, bytearray)) else f'<{len(data)} bytes>'}")
+        sent = radio.send_packets(packets)
+        if sent:
+            print(f"[LoRa TX Packet Sent]: Type={ptype}")
+            preview = str(data)[:16] if not isinstance(data, (bytes, bytearray)) else f"{len(data)}B"
+            if lcd:
+                lcd.log(f"TX {ptype}", preview, duration=2.0)
+            if tts:
+                tts.speak(f"{name} data transmitted.")
+        else:
+            print(f"[LoRa TX Failed]: Type={ptype}")
+            if lcd:
+                lcd.log(f"{ptype} TX FAILED", "", duration=2.0)
+            if tts:
+                tts.speak(f"{name} message failed to send.")
+        time.sleep(0.3)
 
 def run_standalone(lcd=None):
     """Standalone LoRa runner. Primary module in a SessionManager session --
@@ -174,35 +245,7 @@ def run_standalone(lcd=None):
         sm.shutdown()
         return
 
-    def _on_packet(payload):
-        p_type = payload.get("type")
-        print(f"\n[LoRa RX Packet Received]: Type={p_type} | Data={payload}")
-        if p_type == "TEL":
-            bpm = payload.get("BPM", 0)
-            spo2 = payload.get("SPO2", 0)
-            lcd.log(f"RX B:{bpm}", f"S:{spo2}%", duration=3.0)
-            tts.speak(f"Received vitals: heart rate {bpm}, oxygen {spo2} percent")
-        elif p_type in ("DHT", "SND", "MOT", "GPS", "VIT"):
-            summary = ", ".join(f"{k}:{v}" for k, v in payload.items() if k not in ("type", "timestamp"))
-            lcd.log(f"RX {p_type}", summary[:16], duration=3.0)
-            tts.speak(f"Received {p_type} reading: {summary}")
-        elif p_type == "TEXT":
-            msg = str(payload.get("text", ""))
-            lcd.log("RX MSG", msg[:16], duration=3.0)
-            tts.speak(f"Incoming message: {msg}")
-        elif p_type == "IMAGE":
-            lcd.log("RX IMAGE", "SAVED TO DISK", duration=3.0)
-            tts.speak("Incoming image received and saved to disk.")
-        elif p_type == "AUDIO":
-            lcd.log("RX AUDIO", "SAVED TO DISK", duration=3.0)
-            tts.speak("Incoming audio note received.")
-        elif p_type == "ALERT":
-            msg = str(payload.get("data", ""))
-            lcd.log("RX ALERT", msg[:16], duration=5.0)
-            tts.speak(f"Emergency alert: {msg}")
-        else:
-            lcd.log("LORA RX", str(p_type), duration=2.0)
-            tts.speak(f"Received message of type {p_type}")
+    _on_packet = make_packet_handler(lcd, tts)
 
     def _send_text_message(text, source):
         """Compatibility helper for the explicit chat-message escape."""
@@ -219,34 +262,7 @@ def run_standalone(lcd=None):
         return sent
 
     def _send_selected(selected):
-        """Send one packet per chosen source -- keeps each message
-        small and unambiguous rather than bundling everything into one
-        packet (LoRa airtime is precious; chunked encoders already exist
-        for the large IMG/AUD case)."""
-        for name in selected:
-            ptype, data = sm.build_payload(name)
-            if ptype is None:
-                print(f"[LoRa Send] '{name}' has no data ready yet -- skipped.")
-                lcd.log(f"{name.upper()} SKIPPED", "NO DATA", duration=2.0)
-                continue
-
-            if isinstance(data, (bytes, bytearray)):
-                packets = radio.protocol.encode_binary(data, ptype)
-            else:
-                packets = radio.protocol.encode_reading(ptype, data)
-
-            print(f"\n[LoRa TX Attempt]: Type={ptype} | Source={name} | Data={data if not isinstance(data, (bytes, bytearray)) else f'<{len(data)} bytes>'}")
-            sent = radio.send_packets(packets)
-            if sent:
-                print(f"[LoRa TX Packet Sent]: Type={ptype}")
-                preview = str(data)[:16] if not isinstance(data, (bytes, bytearray)) else f"{len(data)}B"
-                lcd.log(f"TX {ptype}", preview, duration=2.0)
-                tts.speak(f"{name} data transmitted.")
-            else:
-                print(f"[LoRa TX Failed]: Type={ptype}")
-                lcd.log(f"{ptype} TX FAILED", "", duration=2.0)
-                tts.speak(f"{name} message failed to send.")
-            time.sleep(0.3)
+        send_selected_payloads(sm, radio, selected, lcd=lcd, tts=tts)
 
     def _wait_for_line(input_queue, timeout):
         """Blocks (without stealing stdin from the keyboard listener

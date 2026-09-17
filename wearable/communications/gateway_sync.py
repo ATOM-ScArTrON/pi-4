@@ -14,7 +14,7 @@ print = display_on_terminal
 PRIORITY = {
     "DHT": 10, "SND": 10, "MOT": 10,
     "GPS": 20,
-    "VIT": 50, "TEL": 50,
+    "VIT": 50,
     "TEXT": 60, "IMAGE": 60, "AUDIO": 60,
     "ALERT": 100
 }
