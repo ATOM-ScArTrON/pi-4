@@ -30,12 +30,25 @@ def send_chat_message(radio, text, source="CHAT"):
 def run_standalone(lcd=None):
     from wearable.ui.stt import SpeechToText
     from wearable.ui.tts import TextToSpeech
+    from wearable.sensors.gps import GPSReceiver
     from wearable.system.session_manager import SessionManager
+
+    # deferred-changes.md §2.1: construct a live GPS receiver and thread it
+    # into SessionManager (which threads it into LoRaRadio -> EpochClock) so
+    # a solid outdoor fix narrows the pseudo-ID lookup window instead of
+    # this launcher permanently running the degraded/monotonic fallback.
+    # GPSReceiver() already no-ops safely (has_fix stays False) if the
+    # hardware/serial port isn't present.
+    gps = GPSReceiver()
 
     # Reuses SessionManager purely for clean LoRa + LCD setup/teardown --
     # chat mode does NOT expose SessionManager's activate/switch commands,
     # to keep this a focused channel rather than the general control surface.
-    sm = SessionManager(primary="lora", lcd=lcd)
+    sm = SessionManager(primary="lora", lcd=lcd, gps=gps)
+    # Also activate "gps" as a background module so SessionManager actually
+    # polls .update() on it -- otherwise has_fix would never advance past
+    # its initial False, even with the receiver constructed above.
+    sm.activate("gps", quiet=True)
     lcd = sm.lcd
     radio = sm.get("lora")
 
