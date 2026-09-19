@@ -53,6 +53,25 @@ MPU6050_ADDR = 0x68       # 6-axis accelerometer & gyroscope
 LORA_PORT = os.environ.get("LORA_PORT", "/dev/serial0")
 LORA_BAUD = 9600
 
+# Production deployments use only the provisioned mission keyset. There is no
+# shared development fallback key: an unprovisioned Pi must fail closed.
+MESH_NONCE_FILE = os.environ.get(
+    "MESH_NONCE_FILE", os.path.join(USER_HOME, ".wearable_mesh_nonce")
+)
+MISSION_KEYSET_PATH = os.environ.get(
+    "MISSION_KEYSET_PATH", os.path.join(USER_HOME, ".wearable_mission_keyset.json")
+)
+DEVICE_ID = os.environ.get("DEVICE_ID", "wearable-node")
+PEER_ID = os.environ.get("PEER_ID", "")
+PROVISION_SERVER_URL = os.environ.get("PROVISION_SERVER_URL", "")
+TLS_CA_FILE = os.environ.get("TLS_CA_FILE", "")
+TLS_CERT_FILE = os.environ.get("TLS_CERT_FILE", "")
+TLS_KEY_FILE = os.environ.get("TLS_KEY_FILE", "")
+GATEWAY_QUEUE_PATH = os.environ.get(
+    "GATEWAY_QUEUE_PATH", os.path.join(USER_HOME, "gateway_queue.jsonl")
+)
+GATEWAY_ENABLED = os.environ.get("GATEWAY_ENABLED", "0") == "1"
+
 # NEO-6M GPS receiver UART (typically UART3 on Pi 4 /dev/ttyAMA3)
 GPS_PORT = os.environ.get("GPS_PORT", "/dev/ttyAMA3")
 GPS_BAUD = 9600
@@ -89,4 +108,3 @@ LORA_COOLDOWN = 3.0       # Cooldown between consecutive LoRa transmissions
 # Ensure storage directories exist
 os.makedirs(PHOTO_DIR, exist_ok=True)
 os.makedirs(RECEIVED_DIR, exist_ok=True)
-
