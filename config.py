@@ -92,6 +92,10 @@ BUTTON_LORA_RX = 16       # GPIO16 (Physical Pin 36) - LoRa Receive Trigger
 LORA_M0_PIN = 22          # GPIO22 (Physical Pin 15)
 LORA_M1_PIN = 23          # GPIO23 (Physical Pin 16)
 
+#GPS Module Pins
+GPS_TX_PIN = 5          # GPIO5 (Physical Pin 27) - GPS TX
+GPS_RX_PIN = 4          # GPIO4 (Physical Pin 7) - GPS RX
+
 # =========================================================
 # THRESHOLDS & TIMINGS
 # =========================================================
