@@ -4,6 +4,10 @@ Provides a single source of truth for all modules.
 """
 
 import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # =========================================================
 # SYSTEM & ENVIRONMENT PATHS
@@ -58,9 +62,7 @@ LORA_BAUD = 9600
 MESH_NONCE_FILE = os.environ.get(
     "MESH_NONCE_FILE", os.path.join(USER_HOME, ".wearable_mesh_nonce")
 )
-MISSION_KEYSET_PATH = os.environ.get(
-    "MISSION_KEYSET_PATH", os.path.join(USER_HOME, ".wearable_mission_keyset.json")
-)
+MISSION_KEYSET_PATH = os.environ.get("MISSION_KEYSET_PATH", os.path.join(USER_HOME, ".wearable_mission_keyset.json"))
 DEVICE_ID = os.environ.get("DEVICE_ID", "wearable-node")
 PEER_ID = os.environ.get("PEER_ID", "")
 PROVISION_SERVER_URL = os.environ.get("PROVISION_SERVER_URL", "")
