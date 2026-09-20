@@ -49,6 +49,11 @@ class VitalsSensor:
         self.last_peak_time = time.time()
         self.is_peak = False
 
+        self._ir_sum = 0
+        self._red_sum = 0
+        self._bpm_sum = 0
+        self._spo2_sum = 0
+
         self._init_sensor()
 
     def _init_sensor(self):
@@ -90,17 +95,26 @@ class VitalsSensor:
             self.red_buffer.clear()
             self.bpm_history.clear()
             self.spo2_history.clear()
+            self._ir_sum = self._red_sum = self._bpm_sum = self._spo2_sum = 0
             self.bpm = None
             self.spo2 = None
             return
 
         self.finger_detected = True
+        buff_len = len(self.ir_buffer)
+
+        if buff_len == 30:
+            self._ir_sum -= self.ir_buffer[0]
+            self._red_sum -= self.red_buffer[0]
+
         self.ir_buffer.append(ir)
         self.red_buffer.append(red)
+        self._ir_sum += ir
+        self._red_sum += red
 
-        if len(self.ir_buffer) >= 15:
-            dc_ir = sum(self.ir_buffer) / len(self.ir_buffer)
-            dc_red = sum(self.red_buffer) / len(self.red_buffer)
+        if buff_len >= 15:
+            dc_ir = self._ir_sum / len(self.ir_buffer)
+            dc_red = self._red_sum / len(self.red_buffer)
             ac_ir = ir - dc_ir
             ac_red = red - dc_red
 
@@ -113,8 +127,11 @@ class VitalsSensor:
                 if 0.60 <= time_delta <= 1.15:
                     raw_bpm = 60.0 / time_delta
                     clamped_bpm = max(60.0, min(90.0, round(raw_bpm, 1)))
+                    if len(self.bpm_history) == 4:
+                        self._bpm_sum -= self.bpm_history[0]
                     self.bpm_history.append(clamped_bpm)
-                    self.bpm = sum(self.bpm_history) / len(self.bpm_history)
+                    self._bpm_sum += clamped_bpm
+                    self.bpm = self._bpm_sum / len(self.bpm_history)
 
             elif ac_ir < -50:
                 self.is_peak = False
@@ -123,10 +140,11 @@ class VitalsSensor:
                 r_ratio = (abs(ac_red) / dc_red) / (abs(ac_ir) / dc_ir)
                 calc_spo2 = 104.0 - (17.0 * r_ratio)
                 if 90.0 <= calc_spo2 <= 99.0:
+                    if len(self.spo2_history) == 3:
+                        self._spo2_sum -= self.spo2_history[0]
                     self.spo2_history.append(calc_spo2)
-                    self.spo2 = sum(self.spo2_history) / len(self.spo2_history)
-                elif self.spo2 is None:
-                    self.spo2 = 98.0
+                    self._spo2_sum += calc_spo2
+                    self.spo2 = self._spo2_sum / len(self.spo2_history)
 
     def close(self):
         if self.bus:
@@ -143,9 +161,14 @@ def run_standalone(lcd=None):
         from wearable.ui.display import Display
         lcd = Display()
 
-    print(f"[MAX30102] Connected: {sensor.is_connected}. Place finger on sensor. Press Ctrl+C to stop.\n")
-    last_lcd_update = 0
+    if not sensor.is_connected:
+        print("[MAX30102] Sensor not detected. Check wiring and I2C bus.")
+        lcd.log("MAX30102", "Sensor not detected", duration=2.0)
+        return
+
     try:
+        print(f"[MAX30102] Connected: {sensor.is_connected}. Place finger on sensor. Press Ctrl+C to stop.\n")
+        last_lcd_update = 0
         while True:
             sensor.update()
             if sensor.finger_detected:
@@ -164,6 +187,8 @@ def run_standalone(lcd=None):
                     last_lcd_update = now
                     lcd.log("VITALS", "PLACE FINGER...", duration=LCD_REFRESH_INTERVAL)
             time.sleep(0.05)
+    except Exception as e:
+        print(f"\n[MAX30102 Error]: {e}")
     except KeyboardInterrupt:
         print("\nStopped.")
     finally:

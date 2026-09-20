@@ -7,6 +7,7 @@ __pycache__/
 # Direnv local security state
 .direnv/
 .envrc
+.env
 
 # Vosk Speech Models
 vosk-model-*/
@@ -20,3 +21,6 @@ vosk-model-*/
 # OS Generated Files
 .DS_Store
 Thumbs.db
+
+#TLS Certificate Files
+TLS/

@@ -66,12 +66,12 @@ class LoRaRadio:
                 if not isinstance(epoch_start_time, (int, float)) or epoch_start_time <= 0:
                     raise ValueError("invalid epoch_start_time")
                 return keyset, broadcast, epoch, epoch_start_time
-        except (OSError, KeyError, TypeError, ValueError):
-            pass
-        raise RuntimeError(
+        except (OSError, KeyError, TypeError, ValueError) as exc:
+            print(f"[LoRa Keyset Error] {type(exc).__name__}: {exc}")
+            raise RuntimeError(
             f"No valid mission keyset found at {MISSION_KEYSET_PATH}. "
             "Provision this Pi before starting LoRa."
-        )
+            ) from exc
 
     def start_listener(self, on_packet_received=None):
         if not self.ser or self.listener_thread: return
