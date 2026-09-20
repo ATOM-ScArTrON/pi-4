@@ -61,7 +61,8 @@ pip install --no-cache-dir \
     adafruit-blinka \
     adafruit-circuitpython-dht \
     RPLCD \
-    vosk 
+    vosk \
+    dotenv
 
 echo "=== 5. Configuring Direnv Automation ==="
 cat << 'EOF' > .envrc
