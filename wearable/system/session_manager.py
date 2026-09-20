@@ -86,9 +86,11 @@ class SessionManager:
             entry = REGISTRY[name]
             try:
                 instance = self._instantiate(name)
-            except Exception as e:
-                print(f"[Session] Failed to activate '{name}': {e}")
-                return False
+
+            except Exception as exc:
+                import traceback 
+                print(f"[Session] Failed to activate '{name}': {exc}")
+                traceback.print_exc()
 
             self._instances[name] = instance
 

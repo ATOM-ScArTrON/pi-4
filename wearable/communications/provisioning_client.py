@@ -99,13 +99,15 @@ def provision(server_url, device_id, output_path, ca_file, cert_file, key_file):
 
 
 def run_standalone():
-    payload = provision(os.environ["PROVISION_SERVER_URL"], os.environ["DEVICE_ID"],
-                        os.environ["MISSION_KEYSET_PATH"], os.environ["TLS_CA_FILE"],
-                        os.environ["TLS_CERT_FILE"], os.environ["TLS_KEY_FILE"])
+    from config import (PROVISION_SERVER_URL, DEVICE_ID, MISSION_KEYSET_PATH,
+                         TLS_CA_FILE, TLS_CERT_FILE, TLS_KEY_FILE)
+    payload = provision(PROVISION_SERVER_URL, DEVICE_ID, MISSION_KEYSET_PATH,
+                        TLS_CA_FILE, TLS_CERT_FILE, TLS_KEY_FILE)
     print(f"Provisioned {len(payload['mission_keyset'])} pairwise peer keys.")
 
 
 if __name__ == "__main__":
-    provision(os.environ["PROVISION_SERVER_URL"], os.environ["DEVICE_ID"],
-              os.environ["MISSION_KEYSET_PATH"], os.environ["TLS_CA_FILE"],
-              os.environ["TLS_CERT_FILE"], os.environ["TLS_KEY_FILE"])
+    from config import (PROVISION_SERVER_URL, DEVICE_ID, MISSION_KEYSET_PATH,
+                         TLS_CA_FILE, TLS_CERT_FILE, TLS_KEY_FILE)
+    provision(PROVISION_SERVER_URL, DEVICE_ID, MISSION_KEYSET_PATH,
+              TLS_CA_FILE, TLS_CERT_FILE, TLS_KEY_FILE)

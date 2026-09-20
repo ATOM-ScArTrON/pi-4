@@ -157,20 +157,20 @@ def run_standalone(lcd=None):
 
     if not stt.model:
         print("[STT] Cannot start - Vosk model not loaded (see error above).")
-        lcd.log("STT FAILED", "NO MODEL", duration=3.0)
+        lcd.show_banner("STT FAILED", "NO MODEL", duration=3.0)
         if own_lcd:
             lcd.close()
         return
 
     stt.start()
     print("[STT] Listening. Speak into the mic. Press Ctrl+C to stop.\n")
-    lcd.log("STT READY", "LISTENING...", duration=2.0)
+    lcd.show_banner("STT READY", "LISTENING...", duration=2.0)
     try:
         while True:
             text = stt.get_transcript(block=True)
             if text:
                 print(f"Heard: {text}")
-                lcd.log("HEARD:", text[:16], duration=2.5)
+                lcd.show_banner("HEARD:", text[:16], duration=2.5)
     except KeyboardInterrupt:
         print("\nStopped.")
     finally:
