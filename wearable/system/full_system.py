@@ -214,7 +214,7 @@ def run_full_system():
             # background threads now -- no manual .update() calls needed here.
             bt.is_connected()  # BT has no SessionManager thread; poll it directly
 
-            if time.time() - last_gateway_sync >= 30.0:
+            if time.time() - last_gateway_sync >= 5.0:
                 last_gateway_sync = time.time()
                 try:
                     synced = lora.sync_gateway()

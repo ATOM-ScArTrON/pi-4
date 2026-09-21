@@ -195,7 +195,23 @@ def run_standalone(lcd=None):
                     elif cmd == "STATUS":
                         print_audio_status(tts, stt, lcd)
                     else:
-                        _send(text, source)
+                        cmd = _parse_command(text, source)
+                        if cmd == "EXIT":
+                            break
+                        elif cmd == "STATUS":
+                            print_audio_status(tts, stt, lcd)
+                        elif cmd == "MUTE_TTS":
+                            tts.mute()
+                        elif cmd == "UNMUTE_TTS":
+                            tts.unmute()
+                        elif cmd == "MUTE_STT":
+                            stt.mute()
+                        elif cmd == "UNMUTE_STT":
+                            stt.unmute()
+                        else:
+                            _send(text, source)
+
+                        time.sleep(0.05)
 
             time.sleep(0.05)
 
