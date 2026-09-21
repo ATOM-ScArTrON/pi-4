@@ -438,6 +438,14 @@ def run_standalone(lcd=None):
                                 print("[LoRa Output]: Queue empty. Listening over the air...")
                                 lcd.log("LORA RX", "NO UNREAD MSGS", duration=2.5)
                                 tts.speak("No unread packets. Listening for incoming signals.")
+                        elif lora_cmd == "MUTE_TTS":
+                            tts.mute()
+                        elif lora_cmd == "UNMUTE_TTS":
+                            tts.unmute()
+                        elif lora_cmd == "MUTE_STT":
+                            stt.mute()
+                        elif lora_cmd == "UNMUTE_STT":
+                            stt.unmute()
                         else:
                             print("[LoRa] Unrecognized input. Use '/send', '/receive', or Chat Mode.")
 
