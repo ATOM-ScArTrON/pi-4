@@ -23,7 +23,7 @@ except ImportError:
     BT_AUTOCONNECT = True
 
 # Increased to 20 seconds to allow slow headphones to broadcast their readable name
-SCAN_DURATION   = 20
+SCAN_DURATION   = 10
 CONNECT_TIMEOUT = 10
 PIPEWIRE_WAIT   = 3
 
