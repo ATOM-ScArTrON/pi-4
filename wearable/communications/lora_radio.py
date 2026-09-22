@@ -185,17 +185,17 @@ def make_packet_handler(lcd, tts):
 
 
 def send_selected_payloads(sm, radio, selected, lcd=None, tts=None):
-    """Send one packet per chosen active data source -- keeps each message
-    small and unambiguous rather than bundling everything into one packet
-    (LoRa airtime is precious; chunked encoders already exist for the large
-    IMG/AUD case). Shared by every launcher that offers a multi-source send
-    (LoRa Radio's own send menu, the Full System coordinator)."""
+    """Send one packet per chosen active data source. Per-source detail
+    stays terminal-only (dual-output rule); LCD/TTS only get a single
+    combined outcome once the whole batch is done."""
+    sent_count = failed_count = 0
+    skipped = []
+
     for name in selected:
         ptype, data = sm.build_payload(name)
         if ptype is None:
             print(f"[LoRa Send] '{name}' has no data ready yet -- skipped.")
-            if lcd:
-                lcd.log(f"{name.upper()} SKIPPED", "NO DATA", duration=2.0)
+            skipped.append(name)
             continue
 
         if isinstance(data, (bytes, bytearray)):
@@ -208,18 +208,29 @@ def send_selected_payloads(sm, radio, selected, lcd=None, tts=None):
         sent = radio.send_packets(packets)
         if sent:
             print(f"[LoRa TX Packet Sent]: Type={ptype}")
-            preview = str(data)[:16] if not isinstance(data, (bytes, bytearray)) else f"{len(data)}B"
-            if lcd:
-                lcd.log(f"TX {ptype}", preview, duration=2.0)
-            if tts:
-                tts.speak(f"{name} data transmitted.")
+            sent_count += 1
         else:
             print(f"[LoRa TX Failed]: Type={ptype}")
-            if lcd:
-                lcd.log(f"{ptype} TX FAILED", "", duration=2.0)
-            if tts:
-                tts.speak(f"{name} message failed to send.")
+            failed_count += 1
         time.sleep(0.3)
+
+    if skipped:
+        print(f"[LoRa Send] Skipped (no data ready): {', '.join(skipped)}")
+
+    if sent_count and not failed_count:
+        line1, line2, speech = "DATA SENT", f"{sent_count} READING(S)", "Data transmitted."
+    elif sent_count and failed_count:
+        line1, line2 = "DATA PARTIAL", f"{sent_count} OK / {failed_count} FAIL"
+        speech = f"Data sent, but {failed_count} failed."
+    elif failed_count:
+        line1, line2, speech = "DATA SEND FAILED", f"{failed_count} FAILED", "Data failed to send."
+    else:
+        line1, line2, speech = "DATA SEND", "NOTHING SENT", None
+
+    if lcd:
+        lcd.log(line1, line2, duration=2.0)
+    if tts and speech:
+        tts.speak(speech)
 
 def run_standalone(lcd=None):
     """Standalone LoRa runner. Primary module in a SessionManager session --

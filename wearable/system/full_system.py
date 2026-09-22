@@ -113,13 +113,13 @@ def run_full_system():
         if now - last_lora_tx_time < LORA_COOLDOWN:
             return
         last_lora_tx_time = now
-
-        sources = sm.payload_sources()
+    
+        sources = sm.payload_sources(include_action=False)  # never auto-send camera/IMG
         if not sources:
             print("[LoRa Send] No active data sources ready to send.")
             lcd.show_banner("LORA TX", "NOTHING READY", duration=2.0)
             return
-
+    
         print(f"\n[LoRa TX Attempt]: Source={source} | Sending={sources}")
         lcd.show_banner("LORA TX", f"{len(sources)} READING(S)", duration=2.0)
         send_selected_payloads(sm, lora, sources, lcd=lcd, tts=tts)
@@ -186,8 +186,9 @@ def run_full_system():
             return None
         if result is not None:
             return None  # other session command (activate/switch/menu) handled
-
-        action = parse_action(text)
+        
+        action_text = text.strip()[1:].strip() if source == "TYPED" and text.strip().startswith("/") else text
+        action = parse_action(action_text)
         print(f"\n[{source} TRIGGER]: '{text}' -> Action: {action}")
 
         if action == "MUTE_TTS":
