@@ -50,6 +50,7 @@ def run_full_system():
 
     sm = SessionManager(primary="lora", lcd=lcd, gps=gps)
     lora = sm.get("lora")
+    lora.debug = False
 
     for name in BACKGROUND_SENSORS:
         sm.activate(name, quiet=True)
@@ -113,13 +114,13 @@ def run_full_system():
         if now - last_lora_tx_time < LORA_COOLDOWN:
             return
         last_lora_tx_time = now
-    
+
         sources = sm.payload_sources(include_action=False)  # never auto-send camera/IMG
         if not sources:
             print("[LoRa Send] No active data sources ready to send.")
             lcd.show_banner("LORA TX", "NOTHING READY", duration=2.0)
             return
-    
+
         print(f"\n[LoRa TX Attempt]: Source={source} | Sending={sources}")
         lcd.show_banner("LORA TX", f"{len(sources)} READING(S)", duration=2.0)
         send_selected_payloads(sm, lora, sources, lcd=lcd, tts=tts)

@@ -141,18 +141,18 @@ class LoRaAssembler:
         ciphertext = body[PSEUDO_ID_SIZE + NONCE_SIZE:]
         cipher, peer_id = self._lookup_cipher(pseudo_id, nonce)
         if cipher is None:
-            if LORA_DEBUG:
-                print(f"[LoRa RX DEBUG] rejected: no pseudo-ID match for epoch {nonce[:4].hex()} "
-                      f"(active epochs: {[e.hex() for e in self.protocol._pseudo_tables]})")
+            # if LORA_DEBUG:
+            #     print(f"[LoRa RX DEBUG] rejected: no pseudo-ID match for epoch {nonce[:4].hex()} "
+            #           f"(active epochs: {[e.hex() for e in self.protocol._pseudo_tables]})")
             return None
         try:
             plaintext = cipher.decrypt(ciphertext, nonce)
             fragment = json.loads(plaintext)
         except (AsconAuthError, ValueError, TypeError, json.JSONDecodeError) as e:
-            if LORA_DEBUG: print(f"[LoRa RX DEBUG] rejected: decrypt/parse failed ({type(e).__name__})")
+            # if LORA_DEBUG: print(f"[LoRa RX DEBUG] rejected: decrypt/parse failed ({type(e).__name__})")
             return None
         if not self.protocol.replay_guard.accept_highest(peer_id, nonce):
-            if LORA_DEBUG: print(f"[LoRa RX DEBUG] rejected: replay guard (peer={peer_id})")
+            # if LORA_DEBUG: print(f"[LoRa RX DEBUG] rejected: replay guard (peer={peer_id})")
             return None
         try:
             session_id = fragment["I"]

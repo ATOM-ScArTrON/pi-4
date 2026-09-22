@@ -19,7 +19,7 @@ from config import LORA_DEBUG
 print = display_on_terminal
 
 class LoRaRadio:
-    def __init__(self, port=LORA_PORT, baudrate=LORA_BAUD, peer_id=PEER_ID, gps_receiver=None):
+    def __init__(self, port=LORA_PORT, baudrate=LORA_BAUD, peer_id=PEER_ID, gps_receiver=None, debug=None):
         self.ser = self.m0 = self.m1 = self.listener_thread = None
         self.peer_id = peer_id
         self.keyset, self.broadcast_key, self.key_epoch, epoch_start_time = self._load_keyset()
@@ -41,6 +41,7 @@ class LoRaRadio:
         self.rx_queue = queue.Queue()
         self.stop_event = threading.Event()
         self.gps_receiver = gps_receiver
+        self.debug = LORA_DEBUG if debug is None else debug
         
         try:
             self.m0 = OutputDevice(LORA_M0_PIN, active_high=True, initial_value=False)
@@ -86,7 +87,7 @@ class LoRaRadio:
             if self.ser and self.ser.is_open and self.ser.in_waiting > 0:
                 try:
                     raw = self.ser.read(self.ser.in_waiting)
-                    if LORA_DEBUG:
+                    if self.debug:
                         print(f"[LoRa RX DEBUG] {len(raw)} raw byte(s): {raw.hex()}")  # confirms step 2
                     self._rx_buffer.extend(raw)
                     while self._rx_buffer:
@@ -106,10 +107,10 @@ class LoRaRadio:
                             self.rx_queue.put(payload)
                             if callback:
                                 callback(payload)
-                        elif LORA_DEBUG:
+                        elif self.debug:
                             print(f"[LoRa RX DEBUG] frame of {frame_length}B decoded to a raw byte count but process_frame() returned None -- rejected at crypto/replay/epoch layer")  # step 3
                 except Exception as e:
-                    if LORA_DEBUG:
+                    if self.debug:
                         print(f"[LoRa RX DEBUG] exception in rx_worker: {e}")
             time.sleep(0.02)
     def send_packets(self, packets, delay_between=0.08):
