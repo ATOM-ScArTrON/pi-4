@@ -25,7 +25,7 @@ from wearable.ui.terminal import display_on_terminal
 print = display_on_terminal
 
 from wearable.system.module_registry import (
-    REGISTRY, MOD_CONTINUOUS, MOD_SERVICE, find_module_by_alias,
+    REGISTRY, MOD_CONTINUOUS, MOD_SERVICE, MOD_ACTION, find_module_by_alias,
 )
 
 HISTORY_MAX = 12
@@ -174,10 +174,17 @@ class SessionManager:
     def get(self, name):
         return self._instances.get(name)
 
-    def payload_sources(self):
+    def payload_sources(self, include_action=True):
         """Active modules that can currently produce a sendable payload --
-        feeds the LoRa send-selector menu."""
-        return [n for n in self._instances if REGISTRY[n].get("payload")]
+        feeds the LoRa send-selector menu. Pass include_action=False to skip
+        'action'-kind modules (currently just camera/IMG) -- useful for
+        automated/background sends that shouldn't silently trigger a photo
+        capture."""
+        return [
+            n for n in self._instances
+            if REGISTRY[n].get("payload")
+            and (include_action or REGISTRY[n]["kind"] != MOD_ACTION)
+        ]
 
     def build_payload(self, name):
         """Runs the registered payload extractor for an active module.
