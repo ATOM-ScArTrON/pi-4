@@ -14,6 +14,7 @@ from wearable.system.epoch_clock import EpochClock
 from wearable.ui.status import print_audio_status
 from wearable.ui.terminal import display_on_terminal
 from config import (GATEWAY_ENABLED, GATEWAY_QUEUE_PATH, DEVICE_ID, PROVISION_SERVER_URL, TLS_CA_FILE, TLS_CERT_FILE, TLS_KEY_FILE)
+from config import LORA_DEBUG
 
 print = display_on_terminal
 
@@ -78,12 +79,16 @@ class LoRaRadio:
         self.stop_event.clear()
         self.listener_thread = threading.Thread(target=self._rx_worker, args=(on_packet_received,), daemon=True)
         self.listener_thread.start()
+        print(f"[LoRa RX] Listener thread started on {self.ser.port}.")  # confirms step 1
 
     def _rx_worker(self, callback):
         while not self.stop_event.is_set():
             if self.ser and self.ser.is_open and self.ser.in_waiting > 0:
                 try:
-                    self._rx_buffer.extend(self.ser.read(self.ser.in_waiting))
+                    raw = self.ser.read(self.ser.in_waiting)
+                    if LORA_DEBUG:
+                        print(f"[LoRa RX DEBUG] {len(raw)} raw byte(s): {raw.hex()}")  # confirms step 2
+                    self._rx_buffer.extend(raw)
                     while self._rx_buffer:
                         body_length = self._rx_buffer[0]
                         frame_length = body_length + 1
@@ -101,10 +106,12 @@ class LoRaRadio:
                             self.rx_queue.put(payload)
                             if callback:
                                 callback(payload)
-                except Exception:
-                    pass
+                        elif LORA_DEBUG:
+                            print(f"[LoRa RX DEBUG] frame of {frame_length}B decoded to a raw byte count but process_frame() returned None -- rejected at crypto/replay/epoch layer")  # step 3
+                except Exception as e:
+                    if LORA_DEBUG:
+                        print(f"[LoRa RX DEBUG] exception in rx_worker: {e}")
             time.sleep(0.02)
-
     def send_packets(self, packets, delay_between=0.08):
         if not self.ser or not self.ser.is_open: return False
         try:

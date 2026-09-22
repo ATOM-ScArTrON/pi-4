@@ -6,7 +6,7 @@ import os
 import struct
 import time
 
-from config import RECEIVED_DIR
+from config import RECEIVED_DIR, LORA_DEBUG
 from wearable.crypto.mesh_crypto import AsconAuthError, AsconCipher, NonceManager, ReplayGuard
 
 MAX_FRAME_BYTES = 120
@@ -125,54 +125,65 @@ class LoRaAssembler:
         self.sessions = {}
         self.protocol._refresh_pseudo_tables()
 
-    def process_frame(self, frame):
-        """Consume one complete binary frame and return a decoded app packet."""
-        if not isinstance(frame, (bytes, bytearray)) or len(frame) < 1:
-            return None
-        body_length = frame[0]
-        body = bytes(frame[1:])
-        if body_length != len(body) or body_length > MAX_FRAME_BYTES:
-            return None
-        if len(body) < FRAME_OVERHEAD:
-            return None
-        pseudo_id = body[:PSEUDO_ID_SIZE]
-        nonce = body[PSEUDO_ID_SIZE:PSEUDO_ID_SIZE + NONCE_SIZE]
-        ciphertext = body[PSEUDO_ID_SIZE + NONCE_SIZE:]
-        cipher, peer_id = self._lookup_cipher(pseudo_id, nonce)
-        if cipher is None:
-            return None
-        try:
-            plaintext = cipher.decrypt(ciphertext, nonce)
-            fragment = json.loads(plaintext)
-        except (AsconAuthError, ValueError, TypeError, json.JSONDecodeError):
-            return None
-        if not self.protocol.replay_guard.accept_highest(peer_id, nonce):
-            return None
-
-        try:
-            session_id = fragment["I"]
-            total = int(fragment["N"])
-            index = int(fragment["X"])
-            chunk = base64.b64decode(fragment["P"], validate=True)
-            if total < 1 or not 1 <= index <= total:
+        def process_frame(self, frame):
+            if not isinstance(frame, (bytes, bytearray)) or len(frame) < 1:
                 return None
-        except (KeyError, TypeError, ValueError, base64.binascii.Error):
-            return None
+            body_length = frame[0]
+            body = bytes(frame[1:])
+            if body_length != len(body) or body_length > MAX_FRAME_BYTES:
+                if LORA_DEBUG: print("[LoRa RX DEBUG] rejected: body length mismatch")
+                return None
+            if len(body) < FRAME_OVERHEAD:
+                if LORA_DEBUG: print("[LoRa RX DEBUG] rejected: body shorter than frame overhead")
+                return None
+            pseudo_id = body[:PSEUDO_ID_SIZE]
+            nonce = body[PSEUDO_ID_SIZE:PSEUDO_ID_SIZE + NONCE_SIZE]
+            ciphertext = body[PSEUDO_ID_SIZE + NONCE_SIZE:]
+            cipher, peer_id = self._lookup_cipher(pseudo_id, nonce)
+            if cipher is None:
+                if LORA_DEBUG:
+                    print(f"[LoRa RX DEBUG] rejected: no pseudo-ID match for epoch {nonce[:4].hex()} "
+                          f"(active epochs: {[e.hex() for e in self.protocol._pseudo_tables]})")
+                return None
+            try:
+                plaintext = cipher.decrypt(ciphertext, nonce)
+                fragment = json.loads(plaintext)
+            except (AsconAuthError, ValueError, TypeError, json.JSONDecodeError) as e:
+                if LORA_DEBUG: print(f"[LoRa RX DEBUG] rejected: decrypt/parse failed ({type(e).__name__})")
+                return None
+            if not self.protocol.replay_guard.accept_highest(peer_id, nonce):
+                if LORA_DEBUG: print(f"[LoRa RX DEBUG] rejected: replay guard (peer={peer_id})")
+                return None
+            try:
+                session_id = fragment["I"]
+                total = int(fragment["N"])
+                index = int(fragment["X"])
+                chunk = base64.b64decode(fragment["P"], validate=True)
+                if total < 1 or not 1 <= index <= total:
+                    if LORA_DEBUG: print("[LoRa RX DEBUG] rejected: fragment index/total out of range")
+                    return None
+            except (KeyError, TypeError, ValueError, base64.binascii.Error) as e:
+                if LORA_DEBUG: print(f"[LoRa RX DEBUG] rejected: malformed fragment metadata ({type(e).__name__})")
+                return None
 
-        session = self.sessions.setdefault(session_id, {"total": total, "chunks": {}})
-        if session["total"] != total:
+            session = self.sessions.setdefault(session_id, {"total": total, "chunks": {}})
+            if session["total"] != total:
+                if LORA_DEBUG: print(f"[LoRa RX DEBUG] rejected: session '{session_id}' total mismatch, dropping session")
+                self.sessions.pop(session_id, None)
+                return None
+            session["chunks"][index] = chunk
+            if len(session["chunks"]) != total:
+                if LORA_DEBUG: print(f"[LoRa RX DEBUG] fragment {index}/{total} buffered for session '{session_id}', waiting on the rest")
+                return None
+            try:
+                payload = json.loads(b"".join(session["chunks"][i] for i in range(1, total + 1)))
+            except (KeyError, TypeError, json.JSONDecodeError) as e:
+                if LORA_DEBUG: print(f"[LoRa RX DEBUG] rejected: reassembled payload invalid JSON ({type(e).__name__})")
+                self.sessions.pop(session_id, None)
+                return None
             self.sessions.pop(session_id, None)
-            return None
-        session["chunks"][index] = chunk
-        if len(session["chunks"]) != total:
-            return None
-        try:
-            payload = json.loads(b"".join(session["chunks"][i] for i in range(1, total + 1)))
-        except (KeyError, TypeError, json.JSONDecodeError):
-            self.sessions.pop(session_id, None)
-            return None
-        self.sessions.pop(session_id, None)
-        return self._to_application_packet(payload, session_id)
+            if LORA_DEBUG: print(f"[LoRa RX DEBUG] session '{session_id}' fully reassembled -> {payload.get('T')}")
+            return self._to_application_packet(payload, session_id)
 
     def _lookup_cipher(self, pseudo_id, nonce):
         self.protocol._refresh_pseudo_tables()

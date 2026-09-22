@@ -73,6 +73,7 @@ GATEWAY_QUEUE_PATH = os.environ.get(
     "GATEWAY_QUEUE_PATH", os.path.join(USER_HOME, "gateway_queue.jsonl")
 )
 GATEWAY_ENABLED = os.environ.get("GATEWAY_ENABLED", "0") == "1"
+LORA_DEBUG = os.environ.get("LORA_DEBUG", "0") == "1"
 
 # NEO-6M GPS receiver UART (typically UART3 on Pi 4 /dev/ttyAMA3)
 GPS_PORT = os.environ.get("GPS_PORT", "/dev/ttyAMA3")
