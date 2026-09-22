@@ -29,6 +29,14 @@ class SoundSensor:
         """Returns 'S:L' for Loud or 'S:Q' for Quiet."""
         return "S:L" if self.is_loud else "S:Q"
 
+    def update(self):
+        """Tick method required by the SessionManager background loop.
+        
+        Reads the hardware value to update internal states if needed.
+        """
+        if self.device:
+            _ = self.device.is_active
+
     def close(self):
         if self.device:
             try:
