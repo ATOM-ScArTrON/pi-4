@@ -193,6 +193,15 @@ def run_full_system():
         if action == "MUTE_TTS":
             tts.mute()
             lcd.show_banner("TTS", "MUTED", duration=1.5)
+        elif action == "UNMUTE_TTS":
+            tts.unmute()
+            lcd.show_banner("TTS", "UNMUTED", duration=1.5)
+        elif action == "MUTE_STT":
+            stt.mute()
+            lcd.show_banner("STT", "MUTED", duration=1.5)
+        elif action == "UNMUTE_STT":
+            stt.unmute()
+            lcd.show_banner("STT", "UNMUTED", duration=1.5)
         elif action == "CAPTURE":
             trigger_photo(source=f"{source} '{text}'")
         elif action == "SEND":

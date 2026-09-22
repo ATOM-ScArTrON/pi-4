@@ -91,6 +91,7 @@ class SessionManager:
                 import traceback 
                 print(f"[Session] Failed to activate '{name}': {exc}")
                 traceback.print_exc()
+                return False
 
             self._instances[name] = instance
 

@@ -63,7 +63,7 @@ MESH_NONCE_FILE = os.environ.get(
     "MESH_NONCE_FILE", os.path.join(USER_HOME, ".wearable_mesh_nonce")
 )
 MISSION_KEYSET_PATH = os.environ.get("MISSION_KEYSET_PATH", os.path.join(USER_HOME, ".wearable_mission_keyset.json"))
-DEVICE_ID = os.environ.get("DEVICE_ID", "wearable-node")
+DEVICE_ID = os.environ.get("DEVICE_ID", "")
 PEER_ID = os.environ.get("PEER_ID", "")
 PROVISION_SERVER_URL = os.environ.get("PROVISION_SERVER_URL", "")
 TLS_CA_FILE = os.environ.get("TLS_CA_FILE", "")
